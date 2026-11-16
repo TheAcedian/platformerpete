@@ -38,6 +38,8 @@
   html,body{margin:0;height:100%;background:#0c0c16;overflow:hidden;font-family:'Trebuchet MS','Segoe UI',Arial,sans-serif;}
   #wrap{display:flex;align-items:center;justify-content:center;height:100%;}
   canvas{background:#1a1a2e;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.6);}
+  /* DESKTOP fit-to-window: scale the 900x620 canvas up or down to the largest size that fits (aspect kept, 12px margin). Clicks already map via getBoundingClientRect. */
+  html:not(.touch) canvas{width:min(calc(100vw - 24px),calc((100vh - 24px)*900/620));height:auto;}
 </style>
 </head>
 <body>
