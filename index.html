@@ -76,6 +76,10 @@ const cv=document.getElementById('c'),ctx=cv.getContext('2d');
 let W=cv.width;const H=cv.height;
 const W_BASE=900, WMAX=1400, CROP_TOP=80;
 let VIEW_TOP=0, PNL_L=20, PNL_R=20;
+// TOUCH intro zoom limit (TITLE + opening CUTSCENE): the visible window is never shorter than y=INTRO_TOP..INTRO_TOP+INTRO_VIS_H.
+// Top = the moon's centre (cutscene moon at (772,80)) so half the moon shows. Bottom = 545: half the dialogue panel would be y=529, but
+// the choice menu's 2nd row ends at y=540, so the limit is nudged down to keep both rows readable.
+const INTRO_TOP=80, INTRO_VIS_H=465;
 // ===== LAYOUT: game viewport on top, dedicated text panel below (two separate areas) =====
 const GAME_H=430;              // game viewport height (everything gameplay draws here)
 const PANEL_Y=GAME_H+8;        // text panel starts below a small gap
@@ -4719,12 +4723,12 @@ function attackAtContact(){
 }
 // FIGHT SFX trigger: same contact frame + tap/hold gate as the rubble hit (attackAtContact), fired once per attack.
 // punch 0/1 (jab, and the double-tap slot that plays the jab) -> jab sound; kick 2 (stomp, tt .80 = foot lands) -> stomp sound.
-// The uppercut (punch 2) and the front/side kicks have no lab sound yet and stay silent.
+// The front/side kicks (kick 0/1) play the same jab punch sound on their contact frame. The uppercut (punch 2) stays silent.
 function attackSfx(){
   const a=pete.attack; if(!a.active || !a.entry || a.sfxDone || !attackAtContact()) return;
   a.sfxDone=true;
   if(a.set==='punch' && a.index<2) playJabSfx();
-  else if(a.set==='kick' && a.index===2) playStompSfx();
+  else if(a.set==='kick') { if(a.index===2) playStompSfx(); else playJabSfx(); }   // front + side kicks reuse the jab punch sound (same bus, voice cap and gap); stomp keeps its own
 }
 // LARGE forgiving interaction box for the rubble pile: any attack landing near it counts.
 function nearRubble(){
@@ -6486,9 +6490,9 @@ const ST_ITEMS=[
 const ST_G='#5dff8a', ST_GM='#2fbf5a', ST_GD='#14502a', ST_BG='#020b05';
 const ST_B='#1ec8ff', ST_BM='#1488b0', ST_BD='#0d4a63', ST_BGLOW='#00cfff', ST_BFILL='#052c3c';   // Biscuit's NEON BLUE palette (sheet only)
 const ST_FONT='Consolas, "Courier New", monospace';
-const ST_FIG={cx:450,feetY:604,sc:3.4,arm:90,leg:24};     // figure placement (rig units -> screen); arm/leg = Vitruvian spread angles (arms level out to the sides, legs apart)
-const ST_BOXW=112, ST_BOXH=32, ST_LX=176, ST_RX=616;   // gear box size and the two columns
-const stNextBtn={x:706,y:10,w:140,h:26};
+const ST_FIG={cx:450,cx0:450,feetY:604,sc:3.4,arm:90,leg:24};     // figure placement (rig units -> screen); arm/leg = Vitruvian spread angles (arms level out to the sides, legs apart)
+const ST_BOXW=112, ST_BOXH=32, ST_LX=176, ST_RX=612;   // gear box size and the two columns
+const stNextBtn={x:380,y:8,w:140,h:26};   // top centre, on the sheet's centre line
 const stOne=['Item'];
 const stNeckSubs=Array.from({length:ST_CAP.neck},(_,i)=>'Necklace '+(i+1));
 const stHandSubs=ST_FINGERS.map(f=>f+' ring'), stFootSubs=ST_TOES.map(f=>f+' ring');
@@ -6524,6 +6528,7 @@ function stBuildFig(){
   const pose=Object.assign({},poseIdleDir('S',0.25),{nearSh:-F.arm,nearEl:0,farSh:F.arm,farEl:0,
     nearHip:-F.leg,farHip:F.leg,nearKnee:0,farKnee:0,bodyY:-4,headYaw:0,headPitch:0});   // Vitruvian: arms level, legs apart (bodyY -4 puts the spread feet on the ground)
   const SK=solve(pose);
+  F.cx=F.cx0-SK.spineMid.x*F.sc;   // put the body's centre line (spine) exactly on the screen's centre x
   const x0=140,y0=0,w=620,h=620;   // wide enough for the full arm span at the larger figure scale
   const renderFig=(items)=>{
     ctx.save();
@@ -6725,8 +6730,8 @@ function drawSkillTree(){
   ctx.save();ctx.shadowColor='#3dff7a';ctx.shadowBlur=6;ctx.globalAlpha=1;     // same glow as Biscuit, no fade
   ctx.drawImage(stFig,stFig._x,stFig._y);ctx.restore();
   // centre title
-  ctx.textAlign='left';ctx.fillStyle=ST_G;ctx.font='bold 16px '+mono;ctx.fillText('- EQUIPMENT -',ST_LX,30);     // moved up-left: Pete's head now fills the top centre
-  ctx.font='10px '+mono;ctx.fillStyle=ST_GM;ctx.fillText('tick a box to wear or remove an item',ST_LX,46);
+  ctx.textAlign='center';ctx.fillStyle=ST_G;ctx.font='bold 16px '+mono;ctx.fillText('- EQUIPMENT -',W/2,62);     // centred above Pete's head (CONTINUE sits above it)
+  ctx.font='10px '+mono;ctx.fillStyle=ST_GM;ctx.fillText('tick a box to wear or remove an item',W/2,78);ctx.textAlign='left';
   // leader lines + joint dots (worn slots get a pulsing ring), then the boxes
   const pulse=0.5+0.5*Math.sin(t*0.1);
   for(const s of ST_SLOTS){ const j=stJ[s.jt], worn=stItemsOf(s).some(it=>it.isOn());
@@ -6763,9 +6768,10 @@ function drawSkillTree(){
   [[49,584],[89,584],[129,584]].forEach(n=>{ctx.moveTo(89,550);ctx.lineTo(n[0],n[1]);});ctx.stroke();
   [[89,550],[49,584],[89,584],[129,584]].forEach(n=>{ctx.beginPath();ctx.arc(n[0],n[1],6,0,6.2832);ctx.stroke();});
   // ---- top-right hint panel ----
-  ctx.fillStyle=ST_GM;ctx.font='bold 10px '+mono;ctx.fillText('HOW IT WORKS',736,62);
+  ctx.fillStyle='rgba(2,22,9,0.88)';ctx.fillRect(732,44,158,186);ctx.strokeStyle=ST_GM;ctx.lineWidth=1;ctx.strokeRect(732.5,44.5,157,185);   // mirrors the left stats panel; starts below the mute icon
+  ctx.fillStyle=ST_GM;ctx.font='bold 10px '+mono;ctx.fillText('HOW IT WORKS',742,66);
   ctx.font='10px '+mono;
-  ['Click the arrow (v) on a','slot to open its list.','Tick a box to wear an item','or untick to take it off.','Neck holds '+ST_CAP.neck+'. Hands and','feet hold '+ST_CAP.hand+' each. Other','spots hold '+ST_CAP.single+'.','','Items are coming soon.'].forEach((l,i)=>ctx.fillText(l,736,82+i*14));
+  ['Click the arrow (v) on a','slot to open its list.','Tick a box to wear an item','or untick to take it off.','Neck holds '+ST_CAP.neck+'. Hands and','feet hold '+ST_CAP.hand+' each. Other','spots hold '+ST_CAP.single+'.','','Items are coming soon.'].forEach((l,i)=>ctx.fillText(l,742,88+i*14));
   // ---- Biscuit corner (bottom-right) ----
   const bx0=732,by0=320,bw=158,bh=284;
   ctx.fillStyle='rgba(2,16,24,0.88)';ctx.fillRect(bx0,by0,bw,bh);ctx.strokeStyle=ST_BM;ctx.lineWidth=1;ctx.strokeRect(bx0+.5,by0+.5,bw-1,bh-1);
@@ -6944,14 +6950,18 @@ if(TOUCH){
     const cs=getComputedStyle(wrapEl), pl=parseFloat(cs.paddingLeft)||0, pt=parseFloat(cs.paddingTop)||0;
     const cw=Math.max(1,VV.w-pl-(parseFloat(cs.paddingRight)||0)), ch=Math.max(1,VV.h-pt-(parseFloat(cs.paddingBottom)||0));
     const wide=(state==='PLATFORMER')&&!mobPaused, a=cw/ch;
+    const intro=(state==='TITLE'||state==='CUTSCENE')&&!mobPaused;   // touch-only intro zoom (this whole layer is inert on desktop)
     let nw=W_BASE, R=H;
     if(wide){ R=Math.max(H-CROP_TOP,Math.min(H,W_BASE/a)); nw=Math.min(WMAX,Math.max(W_BASE,Math.round(a*R))); }
-    const top=H-R, s=Math.min(cw/nw,ch/R);
+    else if(intro){ R=Math.max(INTRO_VIS_H,Math.min(H,W_BASE/a)); }   // fill the width, but never crop past the moon-centre / dialogue-rows limit
+    let top=H-R;
+    if(intro) top=Math.max(0,Math.min(H-R,INTRO_TOP-(R-INTRO_VIS_H)/2));   // centre any spare height around the guaranteed window
+    const s=Math.min(cw/nw,ch/R);
     const wCss=nw*s, hCss=H*s, left=pl+(cw-wCss)/2, topPx=pt+(ch-R*s)/2-top*s;
     const key=[wide?1:0,nw,top,Math.round(s*1000),Math.round(left),Math.round(topPx)].join('|');
     if(key===curKey) return; curKey=key;
     if(cv.width!==nw){ cv.width=nw; }                 // resets the bitmap; the very next frame repaints everything
-    W=nw; VIEW_TOP=Math.round(top); muteBtn.x=W-34;
+    W=nw; VIEW_TOP=intro?0:Math.round(top); muteBtn.x=W-34;
     cv.style.width=wCss+'px'; cv.style.height=hCss+'px'; cv.style.left=left+'px'; cv.style.top=topPx+'px';
     // controller size: thumb targets >= ~64 css px, up to 84 on tall screens; then inset the dialogue box between the two controls
     const b=ch<420?56:Math.max(64,Math.min(84,Math.round(ch*0.17)));   // short phones: slightly smaller pad so the dialogue stays readable between the clusters
