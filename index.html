@@ -22,6 +22,7 @@
   #tc{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10;display:none;pointer-events:none;touch-action:none;--b:64px;}
   #tc.show{display:block;}
   #tc.m-desc #tcR,#tc.m-menu #tcL,#tc.m-hideR #tcR{display:none;}
+  #tc.m-choice .tcb.bA{border-color:#ffe27a;}
   #tc.m-menu .tcb:not(.bA),#tc.m-choice .tcb.bB,#tc.m-choice .tcb.bX,#tc.m-choice .tcb.bY{display:none;}
   #tcL,#tcR{position:absolute;bottom:12px;pointer-events:none;touch-action:none;}
   #tcL{left:calc(env(safe-area-inset-left,0px) + 14px);width:calc(var(--b)*3);height:calc(var(--b)*3);}
@@ -939,7 +940,7 @@ function drawChoice(){
     ctx.fillText((hot?'▶ ':'   ')+choice.options[i].label, ox+10, oy+oh/2+6);
     choiceRects.push({x:ox,y:oy,w:ow,h:oh,i});
   }
-  ctx.fillStyle='#7fd4ff';ctx.font='12px Trebuchet MS';ctx.textAlign='right';ctx.fillText('press number / click',x+w-14,y+bh-10);ctx.textAlign='left';
+  ctx.fillStyle='#7fd4ff';ctx.font='12px Trebuchet MS';ctx.textAlign='right';ctx.fillText(TOUCH?'D-pad + A / tap':'press number / click',x+w-14,y+bh-10);ctx.textAlign='left';
 }
 function pickChoice(i){ if(!choice||i<0||i>=choice.options.length)return; const act=choice.options[i].act; choice=null; act(); }
 
@@ -6449,6 +6450,11 @@ function drawCredits(){
   ctx.strokeStyle='rgba(120,255,200,'+glow+')';ctx.lineWidth=2;rr(rb.x,rb.y,rb.w,rb.h,12);ctx.stroke();
   ctx.fillStyle='#eafff5';ctx.font='bold 20px Trebuchet MS';ctx.fillText('▶ CONTINUE JOURNEY',W/2,rb.y+23);
   ctx.fillStyle='#8a8aa0';ctx.font='12px Trebuchet MS';ctx.fillText('(work in progress)',W/2,rb.y+rb.h+15);ctx.textAlign='left';
+  // RESTART button, top-left, same green style as CONTINUE JOURNEY
+  { const rs=restartBtn; ctx.textAlign='center';
+    ctx.fillStyle=grad(rs.x,rs.y,rs.x,rs.y+rs.h,'#1f9d6b','#0d5c3e');rr(rs.x,rs.y,rs.w,rs.h,12);ctx.fill();
+    ctx.strokeStyle='rgba(120,255,200,'+glow+')';ctx.lineWidth=2;rr(rs.x,rs.y,rs.w,rs.h,12);ctx.stroke();
+    ctx.fillStyle='#eafff5';ctx.font='bold 18px Trebuchet MS';ctx.fillText('\u25C0 RESTART',rs.x+rs.w/2,rs.y+23);ctx.textAlign='left'; }
   drawSnow();
 }
 
@@ -6826,11 +6832,22 @@ function onClick(e){
   }
   else if(state==='CREDITS'){   // only the CONTINUE JOURNEY button does anything (no accidental restart)
     const b=replayBtn; if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h) setState('SKILLTREE');
+    const rs=restartBtn; if(mx>=rs.x&&mx<=rs.x+rs.w&&my>=rs.y&&my<=rs.y+rs.h) restartGame();
   }
   else if(state==='SKILLTREE') skillTreeClick(mx,my);
 }
 // replay button rect on the end screen (also drawn in drawCredits)
 const replayBtn={x:W/2-125,y:369,w:250,h:34};
+// RESTART button, top-left of the end screen (the mute icon is top-right). Back to a fresh TITLE without reloading the page.
+const restartBtn={x:14,y:12,w:150,h:34};
+function restartGame(){
+  box=null; choice=null; puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false; enteringSub=null; timeFall=null; levelFadeIn=0;
+  startAlert=0; levelTimer=LEVEL_TIME_FRAMES; checkpointX=null; beat2Shown=false; descProg=0; descHold=0; stWorn.boxers=true; stOpen=null; stFig=null;
+  cutPhase='intro'; cut=0; introStep=0; yellCount=0; choiceRects=[];
+  for(const k in keys) keys[k]=false; releaseAtkKeys();
+  initLevel();            // fresh pete (jacket:false), plats, traps, pickups, timer
+  setState('TITLE');      // stops every music engine (setState owns music), clears the glow, t=0
+}
 
 // =====================================================================
 // MOBILE / TOUCH SUPPORT. Everything below is inert unless a touch device is detected (TOUCH).
@@ -6882,7 +6899,7 @@ if(TOUCH){
   const DPAD={u:'ArrowUp',d:'ArrowDown',l:'ArrowLeft',r:'ArrowRight'};
   const dpEl={}; for(const k in DPAD) dpEl[k]=tcL.querySelector('.dpa.'+k);
   const FACE=[{el:tcR.querySelector('.bA'),code:'Space'},{el:tcR.querySelector('.bB'),code:'KeyR'},{el:tcR.querySelector('.bX'),code:'KeyF'},{el:tcR.querySelector('.bY'),code:'KeyE'}];
-  const bUse=FACE[3];
+  const bUse=FACE[3], aLbl=FACE[0].el.querySelector('small');
   const shown=el=>!!(el&&el.offsetParent!==null);
   // ---- multi-touch: each finger (pointerId) owns a SET of virtual keys; sliding the thumb re-evaluates it ----
   const ptr=new Map();      // pointerId -> Map(code -> element)
@@ -6958,7 +6975,8 @@ if(TOUCH){
     if(intro) top=Math.max(0,Math.min(H-R,INTRO_TOP-(R-INTRO_VIS_H)/2));   // centre any spare height around the guaranteed window
     const s=Math.min(cw/nw,ch/R);
     const wCss=nw*s, hCss=H*s, left=pl+(cw-wCss)/2, topPx=pt+(ch-R*s)/2-top*s;
-    const key=[wide?1:0,nw,top,Math.round(s*1000),Math.round(left),Math.round(topPx)].join('|');
+    const padUp=(state==='CUTSCENE')&&!!choice&&!mobPaused;   // dialogue choice menu: the D-pad + A overlay the picture, so the choice panel is inset beside them
+    const key=[wide?1:0,nw,top,Math.round(s*1000),Math.round(left),Math.round(topPx),padUp?1:0].join('|');
     if(key===curKey) return; curKey=key;
     if(cv.width!==nw){ cv.width=nw; }                 // resets the bitmap; the very next frame repaints everything
     W=nw; VIEW_TOP=intro?0:Math.round(top); muteBtn.x=W-34;
@@ -6970,6 +6988,13 @@ if(TOUCH){
       const il=parseFloat(cs.paddingLeft)||0, ir=parseFloat(cs.paddingRight)||0;
       let L=Math.ceil((il+14+b*3+10)/s), Rr=Math.ceil((ir+14+b*2.56+10)/s);
       const minW=ch<420?400:560, over=(W-L-Rr)-minW;                    // never squeeze the dialogue below ~560 logical px: overlap the controls a little instead
+      if(over<0){ const k=Math.min(1,-over/(L+Rr)); L=Math.round(L*(1-k)); Rr=Math.round(Rr*(1-k)); }
+      PNL_L=Math.max(20,L); PNL_R=Math.max(20,Rr);
+    } else if(padUp){
+      // choice menu on touch: keep the option text clear of the D-pad (left) and the A/confirm button (right), measured against the canvas edges
+      const ir=parseFloat(cs.paddingRight)||0;
+      let L=Math.ceil((pl+14+b*3+10-left)/s), Rr=Math.ceil((ir+14+b*1.78+10-(VV.w-left-wCss))/s);
+      const over=(W-L-Rr)-(ch<420?440:520);
       if(over<0){ const k=Math.min(1,-over/(L+Rr)); L=Math.round(L*(1-k)); Rr=Math.round(Rr*(1-k)); }
       PNL_L=Math.max(20,L); PNL_R=Math.max(20,Rr);
     } else { PNL_L=20; PNL_R=20; }
@@ -6998,10 +7023,10 @@ if(TOUCH){
     if(state==='PLATFORMER') return 'show';
     if(state==='DESCENT') return 'show m-desc';
     if(state==='TITLE'||state==='CUTSCENE'||state==='CREDITS'||state==='SKILLTREE'){
-      const r=cv.getBoundingClientRect(), b=parseFloat(tc.style.getPropertyValue('--b'))||64, ir=VV.w-r.right, il=r.left;
-      const wantPad=(state==='CUTSCENE'&&!!choice)&&il>=b*3+30;
-      if(ir<b+30) return wantPad?'show m-choice m-hideR':'';
-      return wantPad?'show m-choice':'show m-menu';
+      if(state==='CUTSCENE'&&choice) return 'show m-choice';   // dialogue options: D-pad (move) + A (confirm) always, over the picture; the panel is inset beside them (applyView)
+      const r=cv.getBoundingClientRect(), b=parseFloat(tc.style.getPropertyValue('--b'))||64, ir=VV.w-r.right;
+      if(ir<b+30) return '';
+      return 'show m-menu';
     }
     return '';
   }
@@ -7010,6 +7035,7 @@ if(TOUCH){
     if(key!==curMode){
       curMode=key; releaseAll(); applyView();
       tc.className=ctlClass();
+      aLbl.textContent=tc.classList.contains('m-choice')?'CONFIRM':'JUMP';   // A confirms the highlighted dialogue option
     }
     if(tc.classList.contains('show')){   // Y (pick up) lights up when Pete is in range of an item (same flag that drives the on-screen prompt)
       const hi=(state==='PLATFORMER')&&!!pickupPrompt;
