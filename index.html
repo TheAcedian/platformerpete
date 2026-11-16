@@ -16,20 +16,35 @@
      cqw/cqh = that box's live size (iOS 16+/Chrome 105+); the vw/dvh lines are the fallback for older browsers. */
   html.touch #wrap{position:fixed;left:0;top:0;right:0;bottom:0;width:auto;height:auto;box-sizing:border-box;container-type:size;
     padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);}
-  html.touch canvas{width:min(100vw,calc(100vh*900/620));width:min(100vw,calc(100dvh*900/620));width:min(100cqw,calc(100cqh*900/620));
-    height:auto;border-radius:0;box-shadow:none;touch-action:none;}
-  #tc{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10;display:none;pointer-events:none;touch-action:none;--b:58px;}
+  /* The canvas SIZE/POSITION on touch is set by the script (inline style): it widens/crops the PLATFORMER view to fill a widescreen phone. */
+  html.touch canvas{position:absolute;left:0;top:0;width:900px;height:620px;max-width:none;border-radius:0;box-shadow:none;touch-action:none;}
+  /* ---- game-controller overlay: D-pad (left) + A/B/X/Y diamond (right). --b = thumb target size, set by the script from the screen height. ---- */
+  #tc{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10;display:none;pointer-events:none;touch-action:none;--b:64px;}
   #tc.show{display:block;}
-  #tc.pad-only #tcR{display:none;}
-  .tcc{position:absolute;display:grid;grid-template-columns:repeat(2,var(--b));grid-auto-rows:var(--b);gap:8px;}
-  #tcL{left:calc(env(safe-area-inset-left,0px) + 10px);bottom:10px;}
-  #tcR{right:calc(env(safe-area-inset-right,0px) + 10px);bottom:10px;}
-  .tcb{pointer-events:auto;touch-action:none;box-sizing:border-box;border-radius:50%;display:flex;align-items:center;justify-content:center;
-    background:rgba(20,28,48,.40);border:2px solid rgba(220,235,255,.55);color:rgba(255,255,255,.9);
-    font:bold 12px 'Trebuchet MS','Segoe UI',Arial,sans-serif;letter-spacing:.3px;text-shadow:0 1px 2px #000;}
-  .tcb.arrow{font-size:calc(var(--b)*.42);}
-  .tcb.on{background:rgba(120,190,255,.62);border-color:#fff;}
-  .tcb.hi{border-color:#ffe27a;background:rgba(255,200,60,.48);animation:tcpulse .7s ease-in-out infinite alternate;}
+  #tc.m-desc #tcR,#tc.m-menu #tcL,#tc.m-hideR #tcR{display:none;}
+  #tc.m-menu .tcb:not(.bA),#tc.m-choice .tcb.bB,#tc.m-choice .tcb.bX,#tc.m-choice .tcb.bY{display:none;}
+  #tcL,#tcR{position:absolute;bottom:12px;pointer-events:none;touch-action:none;}
+  #tcL{left:calc(env(safe-area-inset-left,0px) + 14px);width:calc(var(--b)*3);height:calc(var(--b)*3);}
+  #tcR{right:calc(env(safe-area-inset-right,0px) + 14px);width:calc(var(--b)*2.56);height:calc(var(--b)*2.56);}
+  .dpa,.dpc,.tcb{pointer-events:auto;}   /* controls swallow their own taps so nothing leaks through to the canvas click handler */
+  /* D-pad: four arms + a centre disc; the pad is ONE touch zone (angle/offset decides the arms, so diagonals press two) */
+  .dpa{position:absolute;box-sizing:border-box;width:var(--b);height:var(--b);display:flex;align-items:center;justify-content:center;
+    background:rgba(20,28,48,.42);border:2px solid rgba(220,235,255,.55);color:rgba(255,255,255,.92);font-size:calc(var(--b)*.36);text-shadow:0 1px 2px #000;}
+  .dpa.u{left:var(--b);top:0;border-radius:14px 14px 4px 4px;} .dpa.d{left:var(--b);top:calc(var(--b)*2);border-radius:4px 4px 14px 14px;}
+  .dpa.l{left:0;top:var(--b);border-radius:14px 4px 4px 14px;}  .dpa.r{left:calc(var(--b)*2);top:var(--b);border-radius:4px 14px 14px 4px;}
+  .dpc{position:absolute;box-sizing:border-box;left:var(--b);top:var(--b);width:var(--b);height:var(--b);background:rgba(20,28,48,.42);
+    border-top:2px solid transparent;border-bottom:2px solid transparent;}
+  .dpa.on{background:rgba(120,190,255,.66);border-color:#fff;}
+  /* face buttons (classic diamond: A bottom, B right, X left, Y top) */
+  .tcb{position:absolute;touch-action:none;box-sizing:border-box;width:var(--b);height:var(--b);border-radius:50%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:rgba(20,28,48,.42);border:2px solid rgba(220,235,255,.58);color:rgba(255,255,255,.94);
+    font:bold calc(var(--b)*.38) 'Trebuchet MS','Segoe UI',Arial,sans-serif;line-height:1;text-shadow:0 1px 2px #000;}
+  .tcb small{font:bold calc(var(--b)*.15) 'Trebuchet MS','Segoe UI',Arial,sans-serif;letter-spacing:.2px;margin-top:1px;opacity:.9;}
+  .tcb.bA{left:calc(var(--b)*.78);top:calc(var(--b)*1.56);} .tcb.bB{left:calc(var(--b)*1.56);top:calc(var(--b)*.78);}
+  .tcb.bX{left:0;top:calc(var(--b)*.78);} .tcb.bY{left:calc(var(--b)*.78);top:0;}
+  .tcb.bA{background:rgba(40,160,90,.44);} .tcb.bB{background:rgba(190,60,60,.42);} .tcb.bX{background:rgba(50,110,200,.44);} .tcb.bY{background:rgba(200,160,40,.44);}
+  .tcb.on{background:rgba(255,255,255,.55);border-color:#fff;transform:scale(.94);}
+  .tcb.hi{border-color:#ffe27a;box-shadow:0 0 12px 3px rgba(255,226,122,.8);animation:tcpulse .7s ease-in-out infinite alternate;}
   @keyframes tcpulse{from{box-shadow:0 0 4px 1px rgba(255,226,122,.5);}to{box-shadow:0 0 16px 5px rgba(255,226,122,.95);}}
   #rot{position:fixed;left:0;top:0;right:0;bottom:0;z-index:100;display:none;background:#0c0c16;color:#e8f8f2;text-align:center;
     align-items:center;justify-content:center;flex-direction:column;box-sizing:border-box;padding:0 24px;line-height:1.35;font:bold 22px 'Trebuchet MS','Segoe UI',Arial,sans-serif;touch-action:none;}
@@ -56,7 +71,11 @@
 // All characters, world & text original.
 // =====================================================================
 const cv=document.getElementById('c'),ctx=cv.getContext('2d');
-const W=cv.width,H=cv.height;
+// W is LIVE: 900 everywhere except the touch-widescreen PLATFORMER view, where the touch layer widens it (up to WMAX) and
+// crops VIEW_TOP rows off the top so the scene fills a wide phone screen. PNL_L/PNL_R inset the dialogue box between the controls.
+let W=cv.width;const H=cv.height;
+const W_BASE=900, WMAX=1400, CROP_TOP=80;
+let VIEW_TOP=0, PNL_L=20, PNL_R=20;
 // ===== LAYOUT: game viewport on top, dedicated text panel below (two separate areas) =====
 const GAME_H=430;              // game viewport height (everything gameplay draws here)
 const PANEL_Y=GAME_H+8;        // text panel starts below a small gap
@@ -484,7 +503,7 @@ const muteBtn={x:W-34,y:10,w:24,h:20};
 function muteShown(){ return state==='PLATFORMER'||state==='DESCENT'||state==='CREDITS'||state==='SKILLTREE'; }
 function muteHit(mx,my){
   if(!TOUCH) return mx>muteBtn.x-6 && mx<muteBtn.x+muteBtn.w+6 && my>muteBtn.y-6 && my<muteBtn.y+muteBtn.h+6;
-  return mx>W-52-14 && mx<=W+2 && my>=0 && my<6+39+14;
+  return mx>W-52-14 && mx<=W+2 && my>=VIEW_TOP && my<VIEW_TOP+6+39+14;   // VIEW_TOP: the icon rides the top of the cropped widescreen view
 }
 function drawMuteBtn(){
   const b=muteBtn, cx0=b.x, cy0=b.y;
@@ -732,8 +751,8 @@ function drawSnow(){
 // A FIXED, modest scatter of stars in the UPPER sky only (y < ~200) so they read as the night sky
 // behind the scene without dominating. Each twinkles on its own slow phase. Call AFTER the sky
 // gradient fill but BEFORE the buildings/props so stars sit far in the back.
-const stars=[]; for(let i=0;i<34;i++) stars.push({
-  x:Math.random()*W, y:20+Math.random()*170, r:0.6+Math.random()*1.1, ph:Math.random()*6.28, sp:0.02+Math.random()*0.03 });
+const stars=[]; for(let i=0;i<53;i++) stars.push({   // spread over WMAX so the widescreen view is as starry as 900 (53 = 34 * 1400/900)
+  x:Math.random()*WMAX, y:20+Math.random()*170, r:0.6+Math.random()*1.1, ph:Math.random()*6.28, sp:0.02+Math.random()*0.03 });
 function drawStars(){
   ctx.save();
   for(const s of stars){
@@ -752,7 +771,7 @@ let choiceRects=[];
 function drawChoice(){
   if(!choice)return;
   const n=choice.options.length, rowH=32;
-  const x=20, y=PANEL_Y+10, w=W-40, bh=PANEL_H-20;
+  const x=PNL_L, y=PANEL_Y+10, w=W-PNL_L-PNL_R, bh=PANEL_H-20;
   ctx.fillStyle='rgba(8,8,16,.94)';rr(x,y,w,bh,10);ctx.fill();
   ctx.strokeStyle='#ffd54a';ctx.lineWidth=3;rr(x,y,w,bh,10);ctx.stroke();
   ctx.fillStyle='#ffd54a';rr(x+10,y-2,150,22,6);ctx.fill();
@@ -777,7 +796,17 @@ function drawPanelBase(){
   ctx.fillStyle='#141420';ctx.fillRect(0,PANEL_Y,W,PANEL_H);
   ctx.strokeStyle='#2a2a3e';ctx.lineWidth=2;ctx.strokeRect(1,PANEL_Y,W-2,PANEL_H-1);
 }
-let box=null;function showBox(l){box={lines:Array.isArray(l)?l:[l]};}
+// On touch screens the on-screen hints name the controller buttons instead of keyboard keys.
+function touchTxt(s){
+  if(/move in depth/.test(s)) return 'D-pad move  \u2022  \u25B2 \u25BC depth  \u2022  A jump\n B punch  \u2022  X kick  \u2022  Y pick up';
+  return s.replace(/\(F\)/g,'(X)').replace(/PUNCH \(R\)/g,'PUNCH (B)').replace(/R to punch/g,'B to punch').replace(/F to kick/g,'X to kick');
+}
+const TT_SEG={'R':'B','F':'X','Space':'A','\u2190 \u2192':'D-pad \u25C0 \u25B6','\u2191 \u2193':'\u25B2 \u25BC','\u2193 / S':'\u25BC'};
+function touchLine(ln){
+  if(typeof ln==='string') return touchTxt(ln);
+  return ln.map(sg=>({text:(TT_SEG[sg.text]!==undefined?TT_SEG[sg.text]:touchTxt(sg.text)),color:sg.color}));
+}
+let box=null;function showBox(l){ let a=Array.isArray(l)?l:[l]; if(typeof TOUCH!=='undefined'&&TOUCH) a=a.map(touchLine).reduce((o,l)=>{ if(typeof l==='string'&&l.indexOf('\n')>=0) l.split('\n').forEach(p=>o.push(p.trim())); else o.push(l); return o; },[]); box={lines:a}; }
 // A line can be a plain string OR an array of {text,color} segments (color optional).
 // Draws left-to-right, returns nothing. Default color used when a segment has none.
 function drawLineSegments(line, x, y, defColor){
@@ -791,7 +820,7 @@ function drawLineSegments(line, x, y, defColor){
   }
 }
 function drawBox(){
-  if(!box)return;const x=20,y=PANEL_Y+10,w=W-40,bh=PANEL_H-20;
+  if(!box)return;const x=PNL_L,y=PANEL_Y+10,w=W-PNL_L-PNL_R,bh=PANEL_H-20;
   ctx.fillStyle='rgba(8,8,16,.92)';rr(x,y,w,bh,10);ctx.fill();
   ctx.strokeStyle='#16c79a';ctx.lineWidth=3;rr(x,y,w,bh,10);ctx.stroke();
   ctx.fillStyle='#16c79a';rr(x+10,y-2,150,22,6);ctx.fill();
@@ -3400,8 +3429,8 @@ function drawPete(cx,feetY,s,o={}){
   // BIG FOOT / BIG HAND screen caps (lab: 92% of the canvas). The game's viewport is W x GAME_H (the text panel sits below it).
   { const SCv=SC*Math.max(1,stv), MARG=0.92;
     _stompBodyScale = SC;
-    _stompScreenCapU = Math.min((GAME_H*MARG)/(SCv*FOOT_LOCAL_HTAP), (W*MARG)/(SCv*FOOT_LOCAL_WID));
-    _handScreenCapU  = Math.min((GAME_H*MARG)/(SCv*HAND_ART_OPEN_H), (W*MARG)/(SCv*HAND_ART_OPEN_W)); }
+    _stompScreenCapU = Math.min(((GAME_H-VIEW_TOP)*MARG)/(SCv*FOOT_LOCAL_HTAP), (W*MARG)/(SCv*FOOT_LOCAL_WID));
+    _handScreenCapU  = Math.min(((GAME_H-VIEW_TOP)*MARG)/(SCv*HAND_ART_OPEN_H), (W*MARG)/(SCv*HAND_ART_OPEN_W)); }
   // STOMP IMPACT VFX: broken ground + red glow around the planted foot, drawn BEFORE the body so it sits behind Pete.
   { const gc=pose._groundCrack||0;
     if(gc>0.01) drawStompShatter(cx+shx, feetY+plant*SC, gc, SC); }
@@ -4702,7 +4731,7 @@ function updatePlatformer(){
   if(_kR||_kL)      pete.walk += Math.max(0.14, Math.abs(pete.vx)*0.12);  // horizontal stride ~ speed
   else if(_kU||_kD) pete.walk += 0.14;                                     // steady depth stride
   else              pete.walk  = 0;                                        // idle -> neutral stance
-  camX=Math.max(0,Math.min(pete.x-300,stair.x+stair.w-W+80));
+  camX=Math.max(0,Math.min(pete.x-Math.round(W/3),stair.x+stair.w-W+80+(PNL_R-20)));   // widescreen: keep the stairwell clear of the A/B/X/Y cluster   // W/3 = 300 at the 900 view; keeps Pete a third in on the widescreen view too
   // keep important messages up while moving (ones starting with O = "Ow..." fire, Y = "You've gained...")
   if(box){ const l0=box.lines[0]; const c0=(typeof l0==='string'?l0:(l0[0]&&l0[0].text||''))[0];
     if((pete.vx!==0||!pete.onGround)&&c0!=='O'&&c0!=='Y')box=null; }
@@ -6277,8 +6306,8 @@ const ST_ITEMS=[
 const ST_G='#5dff8a', ST_GM='#2fbf5a', ST_GD='#14502a', ST_BG='#020b05';
 const ST_B='#1ec8ff', ST_BM='#1488b0', ST_BD='#0d4a63', ST_BGLOW='#00cfff', ST_BFILL='#052c3c';   // Biscuit's NEON BLUE palette (sheet only)
 const ST_FONT='Consolas, "Courier New", monospace';
-const ST_FIG={cx:450,feetY:600,sc:3.0,arm:90,leg:24};     // figure placement (rig units -> screen); arm/leg = Vitruvian spread angles (arms level out to the sides, legs apart)
-const ST_BOXW=118, ST_BOXH=32, ST_LX=176, ST_RX=606;   // gear box size and the two columns
+const ST_FIG={cx:450,feetY:604,sc:3.4,arm:90,leg:24};     // figure placement (rig units -> screen); arm/leg = Vitruvian spread angles (arms level out to the sides, legs apart)
+const ST_BOXW=112, ST_BOXH=32, ST_LX=176, ST_RX=616;   // gear box size and the two columns
 const stNextBtn={x:706,y:10,w:140,h:26};
 const stOne=['Item'];
 const stNeckSubs=Array.from({length:ST_CAP.neck},(_,i)=>'Necklace '+(i+1));
@@ -6288,17 +6317,17 @@ const stHandSubs=ST_FINGERS.map(f=>f+' ring'), stFootSubs=ST_TOES.map(f=>f+' rin
 const ST_SLOTS=[
   {id:'head',  label:'HEAD',        side:'L',y:58, jt:'head',  cap:ST_CAP.single,subs:stOne},
   {id:'neck',  label:'NECK',        side:'L',y:98, jt:'neck',  cap:ST_CAP.neck,  subs:stNeckSubs},
-  {id:'sh',    label:'SHOULDERS',   side:'L',y:150,jt:'shN',jts:['shF'],cap:ST_CAP.single,subs:stOne},
-  {id:'hdR',   label:'R. HAND',     side:'L',y:200,jt:'hdN',   cap:ST_CAP.hand,  subs:stHandSubs},
-  {id:'wrR',   label:'R. WRIST',    side:'L',y:316,jt:'wrN',   cap:ST_CAP.single,subs:stOne},
-  {id:'elR',   label:'R. ELBOW',    side:'L',y:352,jt:'elN',   cap:ST_CAP.single,subs:stOne},
+  {id:'sh',    label:'SHOULDERS',   side:'L',y:136,jt:'shN',jts:['shF'],cap:ST_CAP.single,subs:stOne},
+  {id:'hdR',   label:'R. HAND',     side:'L',y:174,jt:'hdN',   cap:ST_CAP.hand,  subs:stHandSubs},
+  {id:'wrR',   label:'R. WRIST',    side:'L',y:276,jt:'wrN',   cap:ST_CAP.single,subs:stOne},
+  {id:'elR',   label:'R. ELBOW',    side:'L',y:312,jt:'elN',   cap:ST_CAP.single,subs:stOne},
   {id:'knR',   label:'R. KNEE',     side:'L',y:462,jt:'knN',   cap:ST_CAP.single,subs:stOne},
   {id:'ftR',   label:'R. FOOT',     side:'L',y:540,jt:'ftN',   cap:ST_CAP.foot,  subs:stFootSubs},
-  {id:'chest', label:'CHEST',       side:'R',y:110,jt:'chest', cap:ST_CAP.single,subs:stOne},
-  {id:'hdL',   label:'L. HAND',     side:'R',y:200,jt:'hdF',   cap:ST_CAP.hand,  subs:stHandSubs},
-  {id:'wrL',   label:'L. WRIST',    side:'R',y:316,jt:'wrF',   cap:ST_CAP.single,subs:stOne},
-  {id:'elL',   label:'L. ELBOW',    side:'R',y:352,jt:'elF',   cap:ST_CAP.single,subs:stOne},
-  {id:'waist', label:'WAIST',       side:'R',y:390,jt:'waist', cap:ST_CAP.single,subs:stOne},
+  {id:'chest', label:'CHEST',       side:'R',y:100,jt:'chest', cap:ST_CAP.single,subs:stOne},
+  {id:'hdL',   label:'L. HAND',     side:'R',y:174,jt:'hdF',   cap:ST_CAP.hand,  subs:stHandSubs},
+  {id:'wrL',   label:'L. WRIST',    side:'R',y:276,jt:'wrF',   cap:ST_CAP.single,subs:stOne},
+  {id:'elL',   label:'L. ELBOW',    side:'R',y:312,jt:'elF',   cap:ST_CAP.single,subs:stOne},
+  {id:'waist', label:'WAIST',       side:'R',y:360,jt:'waist', cap:ST_CAP.single,subs:stOne},
   {id:'legs',  label:'LEGS',        side:'R',y:428,jt:'lgF',jts:['lgN'],cap:ST_CAP.single,subs:stOne},
   {id:'knL',   label:'L. KNEE',     side:'R',y:466,jt:'knF',   cap:ST_CAP.single,subs:stOne},
   {id:'ank',   label:'ANKLES',      side:'R',y:504,jt:'ankF',jts:['ankN'],cap:ST_CAP.single,subs:stOne},
@@ -6315,7 +6344,7 @@ function stBuildFig(){
   const pose=Object.assign({},poseIdleDir('S',0.25),{nearSh:-F.arm,nearEl:0,farSh:F.arm,farEl:0,
     nearHip:-F.leg,farHip:F.leg,nearKnee:0,farKnee:0,bodyY:-4,headYaw:0,headPitch:0});   // Vitruvian: arms level, legs apart (bodyY -4 puts the spread feet on the ground)
   const SK=solve(pose);
-  const x0=200,y0=0,w=500,h=620;
+  const x0=140,y0=0,w=620,h=620;   // wide enough for the full arm span at the larger figure scale
   const renderFig=(items)=>{
     ctx.save();
     ctx.fillStyle='#ff00ff';ctx.fillRect(x0,y0,w,h);
@@ -6398,20 +6427,16 @@ function stScaredFace(c,head,F,x0,y0){
   const SKIN='#23984a', RIM='#06220f', WHITE='#d6ffe2', BR='#5dff8a';
   c.fillStyle=SKIN;c.fillRect(-12,-17,24,14);c.fillRect(-8,-3,18,9);          // clear the stock eyes, nose and mouth
   c.lineCap='round';c.lineJoin='round';
-  // wide-open eyes (big white, thin rim) with tiny pinprick pupils
+  // MILD SHOCK: slightly widened eyes with normal-size pupils, softly raised brows, a small mouth, no sweat
   for(const ex of [-4,7]){
-    c.beginPath();c.arc(ex,-9.5,6.2,0,6.2832);c.fillStyle=WHITE;c.fill();c.strokeStyle=RIM;c.lineWidth=1.5;c.stroke();
-    c.beginPath();c.arc(ex,-9.5,1.5,0,6.2832);c.fillStyle=RIM;c.fill(); }
+    c.beginPath();c.arc(ex,-9.5,4.4,0,6.2832);c.fillStyle=WHITE;c.fill();c.strokeStyle=RIM;c.lineWidth=1.4;c.stroke();
+    c.beginPath();c.arc(ex,-9.5,2.0,0,6.2832);c.fillStyle=RIM;c.fill(); }
   // nose line
   c.strokeStyle=RIM;c.lineWidth=1.3;c.beginPath();c.moveTo(1.5,-4);c.lineTo(1.5,-0.5);c.stroke();
-  // worried brows: inner ends raised
-  c.strokeStyle=BR;c.lineWidth=2.2;c.beginPath();c.moveTo(-11,-17.5);c.lineTo(-2,-21.5);c.moveTo(13,-17.5);c.lineTo(4,-21.5);c.stroke();
-  // small open mouth
-  c.beginPath();c.ellipse(1.5,2.6,3.2,3.8,0,0,6.2832);c.fillStyle='#04140a';c.fill();c.strokeStyle=RIM;c.lineWidth=1.3;c.stroke();
-  // sweat drops
-  const drop=(x,y,s)=>{ c.beginPath();c.moveTo(x,y-4*s);c.bezierCurveTo(x+3*s,y,x+3*s,y+3.5*s,x,y+3.5*s);c.bezierCurveTo(x-3*s,y+3.5*s,x-3*s,y,x,y-4*s);
-    c.fillStyle='#a8ffd0';c.fill();c.strokeStyle=BR;c.lineWidth=1.1;c.stroke(); };
-  drop(17.5,-15,1);drop(-17,-6,0.8);
+  // brows: gently raised, barely tilted
+  c.strokeStyle=BR;c.lineWidth=2;c.beginPath();c.moveTo(-9,-16.5);c.lineTo(-1,-17.8);c.moveTo(12,-16.5);c.lineTo(4,-17.8);c.stroke();
+  // small mouth: a short flat oval, slightly parted
+  c.beginPath();c.ellipse(1.5,3,2.4,1.5,0,0,6.2832);c.fillStyle='#04140a';c.fill();c.strokeStyle=RIM;c.lineWidth=1.1;c.stroke();
   c.restore();
 }
 function stCheck(x,y,on,active){
@@ -6657,40 +6682,56 @@ if(TOUCH){
   };
   // ---- build the controls ----
   const tc=document.createElement('div'); tc.id='tc';
-  tc.innerHTML='<div id="tcL" class="tcc"></div><div id="tcR" class="tcc"></div>';
+  tc.innerHTML='<div id="tcL"><div class="dpc"></div><div class="dpa u">&#9650;</div><div class="dpa l">&#9664;</div><div class="dpa r">&#9654;</div><div class="dpa d">&#9660;</div></div>'+
+    '<div id="tcR"><div class="tcb bY">Y<small>PICK UP</small></div><div class="tcb bX">X<small>KICK</small></div><div class="tcb bB">B<small>PUNCH</small></div><div class="tcb bA">A<small>JUMP</small></div></div>';
   document.body.appendChild(tc);
   const rot=document.createElement('div'); rot.id='rot';
   rot.innerHTML='<span class="ic">&#128241;</span>Rotate your phone to landscape';
   document.body.appendChild(rot);
   const tcL=tc.querySelector('#tcL'), tcR=tc.querySelector('#tcR');
-  const BTNS=[];
-  const mk=(parent,code,label,cls)=>{
-    const el=document.createElement('div'); el.className='tcb'+(cls?' '+cls:''); el.innerHTML=label;
-    parent.appendChild(el);
-    const b={el:el,code:code,cnt:0}; BTNS.push(b);
-    el.addEventListener('pointerdown',e=>{ e.preventDefault(); setPtr(e.pointerId,btnAt(e.clientX,e.clientY)||b); });
-    return b;
-  };
-  // left: up/down (= W/S depth lanes) on top, left/right underneath
-  mk(tcL,'ArrowUp','&#9650;','arrow'); mk(tcL,'ArrowDown','&#9660;','arrow');
-  mk(tcL,'ArrowLeft','&#9664;','arrow'); mk(tcL,'ArrowRight','&#9654;','arrow');
-  // right: PUNCH KICK / PICK UP JUMP
-  mk(tcR,'KeyR','PUNCH'); mk(tcR,'KeyF','KICK');
-  const bUse=mk(tcR,'KeyE','PICK UP'); mk(tcR,'Space','JUMP');
-  // ---- multi-touch: each finger (pointerId) holds exactly one button; sliding between buttons works ----
-  const ptr=new Map();
-  const setOn=(b,on)=>b.el.classList.toggle('on',on);
-  function btnAt(x,y){
-    for(const b of BTNS){ const r=b.el.getBoundingClientRect(); if(r.width&&x>=r.left-4&&x<=r.right+4&&y>=r.top-4&&y<=r.bottom+4) return b; }
-    return null;
+  // ---- CONTROLLER MAP. Every control drives the SAME key state as the keyboard (virtual key presses). ----
+  //   D-pad  up/down/left/right = ArrowUp / ArrowDown (W/S depth lanes) / ArrowLeft / ArrowRight (diagonals press two arms)
+  //   A = Space (jump; also confirms TITLE / cutscene / CREDITS / SKILLTREE)      B = KeyR (punch: tap jab, double-tap step-jab, hold uppercut)
+  //   X = KeyF (kick: tap front kick, double-tap side kick, hold stomp)           Y = KeyE (pick up / interact)
+  const DPAD={u:'ArrowUp',d:'ArrowDown',l:'ArrowLeft',r:'ArrowRight'};
+  const dpEl={}; for(const k in DPAD) dpEl[k]=tcL.querySelector('.dpa.'+k);
+  const FACE=[{el:tcR.querySelector('.bA'),code:'Space'},{el:tcR.querySelector('.bB'),code:'KeyR'},{el:tcR.querySelector('.bX'),code:'KeyF'},{el:tcR.querySelector('.bY'),code:'KeyE'}];
+  const bUse=FACE[3];
+  const shown=el=>!!(el&&el.offsetParent!==null);
+  // ---- multi-touch: each finger (pointerId) owns a SET of virtual keys; sliding the thumb re-evaluates it ----
+  const ptr=new Map();      // pointerId -> Map(code -> element)
+  const lit=new Map();      // element -> number of fingers holding it (for the pressed look)
+  const litAdd=(el,d)=>{ const n=Math.max(0,(lit.get(el)||0)+d); lit.set(el,n); el.classList.toggle('on',n>0); };
+  // which keys does a finger at (x,y) hold?  D-pad = one zone, offset from the centre picks the arms; face = nearest button inside its circle
+  function codesAt(x,y){
+    const out=new Map();   // code -> element
+    if(shown(tcL)){
+      const r=tcL.getBoundingClientRect(), u=r.width/3, cx=r.left+r.width/2, cy=r.top+r.height/2, slop=u*0.35;
+      if(x>=r.left-slop&&x<=r.right+slop&&y>=r.top-slop&&y<=r.bottom+slop){
+        const nx=(x-cx)/u, ny=(y-cy)/u, th=0.34;
+        if(nx<-th) out.set(DPAD.l,dpEl.l); if(nx>th) out.set(DPAD.r,dpEl.r);
+        if(ny<-th) out.set(DPAD.u,dpEl.u); if(ny>th) out.set(DPAD.d,dpEl.d);
+      }
+    }
+    if(shown(tcR)){
+      let best=null,bd=1e9;
+      for(const f of FACE){ if(!shown(f.el)) continue; const r=f.el.getBoundingClientRect(), d=Math.hypot(x-(r.left+r.width/2),y-(r.top+r.height/2));
+        if(d<=r.width/2+r.width*0.12&&d<bd){ best=f; bd=d; } }
+      if(best) out.set(best.code,best.el);
+    }
+    return out;
   }
-  function setPtr(id,b){
-    const old=ptr.get(id); if(old===b) return;
-    if(old){ vkRelease(old.code); if(--old.cnt<=0){ old.cnt=0; setOn(old,false); } ptr.delete(id); }
-    if(b){ b.cnt++; setOn(b,true); vkPress(b.code); ptr.set(id,b); }
+  function setPtr(id,map,keep){
+    const old=ptr.get(id)||new Map(); map=map||new Map();
+    for(const [code,el] of old) if(!map.has(code)){ vkRelease(code); litAdd(el,-1); }
+    for(const [code,el] of map) if(!old.has(code)){ vkPress(code); litAdd(el,1); }
+    if(keep||map.size) ptr.set(id,map); else ptr.delete(id);   // keep: a finger that landed on the controller but not on a key stays tracked, so sliding onto an arm/button works
   }
+  const ptrAt=e=>codesAt(e.clientX,e.clientY);
+  function inCluster(x,y){ for(const g of [tcL,tcR]){ if(!shown(g)) continue; const r=g.getBoundingClientRect(); if(x>=r.left&&x<=r.right&&y>=r.top&&y<=r.bottom) return true; } return false; }   // gaps between buttons count as controller
   function releaseAll(){ for(const id of Array.from(ptr.keys())) setPtr(id,null); }
-  addEventListener('pointermove',e=>{ if(ptr.has(e.pointerId)) setPtr(e.pointerId,btnAt(e.clientX,e.clientY)); });
+  addEventListener('pointerdown',e=>{ if(!tc.classList.contains('show')) return; const m=ptrAt(e); if(m.size||(e.target&&e.target.closest&&e.target.closest('#tc'))||inCluster(e.clientX,e.clientY)){ e.preventDefault(); setPtr(e.pointerId,m,true); } });
+  addEventListener('pointermove',e=>{ if(ptr.has(e.pointerId)) setPtr(e.pointerId,ptrAt(e),true); });
   addEventListener('pointerup',e=>{ if(ptr.has(e.pointerId)) setPtr(e.pointerId,null); });
   addEventListener('pointercancel',e=>{ if(ptr.has(e.pointerId)) setPtr(e.pointerId,null); });
   addEventListener('lostpointercapture',e=>{ if(ptr.has(e.pointerId)) setPtr(e.pointerId,null); });
@@ -6714,27 +6755,42 @@ if(TOUCH){
     const pr=wrapEl.getBoundingClientRect();
     VV={x:0,y:0,w:Math.round(pr.width||innerWidth),h:Math.round(pr.height||innerHeight)};
   }
-  function layout(){
-    fit();
-    const vw=VV.w, vh=VV.h;
-    const r0=cv.getBoundingClientRect();
-    const r={left:r0.left-VV.x,right:r0.right-VV.x,top:r0.top-VV.y,bottom:r0.bottom-VV.y,height:r0.height};
-    const s=r.height/H;
-    let b=Math.max(56,Math.min(72,Math.round(vh*0.17)));
-    const gb=Math.floor((Math.min(r.left,vw-r.right)-22)/2);   // biggest button that still fits the side gutter
-    if(gb>=56) b=Math.min(b,gb);
+  // ---- WIDESCREEN FIT (see the report): in PLATFORMER the logical view is widened to the screen's aspect (900..WMAX wide) and the
+  // top CROP_TOP rows (empty sky) are cropped, so the scene fills the phone instead of letterboxing. Menus/title/credits/skill tree/
+  // descent stay the full 900x620 picture, centred and as large as fits. The canvas element is sized+offset here; taps still map
+  // through getBoundingClientRect, and the HUD (timer, mute) is drawn at VIEW_TOP so it stays on screen.
+  let curKey='';
+  function applyView(){
+    const cs=getComputedStyle(wrapEl), pl=parseFloat(cs.paddingLeft)||0, pt=parseFloat(cs.paddingTop)||0;
+    const cw=Math.max(1,VV.w-pl-(parseFloat(cs.paddingRight)||0)), ch=Math.max(1,VV.h-pt-(parseFloat(cs.paddingBottom)||0));
+    const wide=(state==='PLATFORMER')&&!mobPaused, a=cw/ch;
+    let nw=W_BASE, R=H;
+    if(wide){ R=Math.max(H-CROP_TOP,Math.min(H,W_BASE/a)); nw=Math.min(WMAX,Math.max(W_BASE,Math.round(a*R))); }
+    const top=H-R, s=Math.min(cw/nw,ch/R);
+    const wCss=nw*s, hCss=H*s, left=pl+(cw-wCss)/2, topPx=pt+(ch-R*s)/2-top*s;
+    const key=[wide?1:0,nw,top,Math.round(s*1000),Math.round(left),Math.round(topPx)].join('|');
+    if(key===curKey) return; curKey=key;
+    if(cv.width!==nw){ cv.width=nw; }                 // resets the bitmap; the very next frame repaints everything
+    W=nw; VIEW_TOP=Math.round(top); muteBtn.x=W-34;
+    cv.style.width=wCss+'px'; cv.style.height=hCss+'px'; cv.style.left=left+'px'; cv.style.top=topPx+'px';
+    // controller size: thumb targets >= ~64 css px, up to 84 on tall screens; then inset the dialogue box between the two controls
+    const b=ch<420?56:Math.max(64,Math.min(84,Math.round(ch*0.17)));   // short phones: slightly smaller pad so the dialogue stays readable between the clusters
     tc.style.setProperty('--b',b+'px');
-    const need=b*2+8+14;
-    const lift=Math.max(10,Math.round(vh-(r.top+PANEL_Y*s)+8));   // keep clear of the dialogue panel
-    tcL.style.bottom=((r.left>=need)?10:lift)+'px';
-    tcR.style.bottom=((vw-r.right>=need)?10:lift)+'px';
+    if(wide){
+      const il=parseFloat(cs.paddingLeft)||0, ir=parseFloat(cs.paddingRight)||0;
+      let L=Math.ceil((il+14+b*3+10)/s), Rr=Math.ceil((ir+14+b*2.56+10)/s);
+      const minW=ch<420?400:560, over=(W-L-Rr)-minW;                    // never squeeze the dialogue below ~560 logical px: overlap the controls a little instead
+      if(over<0){ const k=Math.min(1,-over/(L+Rr)); L=Math.round(L*(1-k)); Rr=Math.round(Rr*(1-k)); }
+      PNL_L=Math.max(20,L); PNL_R=Math.max(20,Rr);
+    } else { PNL_L=20; PNL_R=20; }
   }
+  function layout(){ fit(); applyView(); }
   let curMode='', curHi=false;
   function orient(){
     fit();
     const portrait=VV.h>VV.w;
     if(portrait!==mobPaused){ mobPaused=portrait; rot.style.display=portrait?'flex':'none'; if(portrait) releaseAll(); }
-    layout();
+    layout(); curMode='?';   // force the next tick to re-pick the controller layout for the new size
   }
   // recompute on any change of the visible area (rotation, address bar show/hide, fullscreen); light debounce + late re-checks for slow browsers
   let fitTm=0;
@@ -6744,14 +6800,29 @@ if(TOUCH){
   document.addEventListener('fullscreenchange',refitLate); document.addEventListener('webkitfullscreenchange',refitLate);
   if(window.visualViewport){ visualViewport.addEventListener('resize',refit); visualViewport.addEventListener('scroll',refit); }
   orient();
-  mobTick=function(){
-    const mode=(!mobPaused&&(state==='PLATFORMER'||state==='DESCENT'))?state:'';
-    if(mode!==curMode){
-      curMode=mode; tc.className=mode?('show'+(mode==='DESCENT'?' pad-only':'')):'';
-      if(!mode) releaseAll(); else layout();
+  // which controller layout each screen gets: PLATFORMER = everything, DESCENT = D-pad only (hold down), menus = the A button only
+  // (A = Space confirms), plus the D-pad on a cutscene choice. Menus keep the full 900x620 picture centred, so A/D-pad only show when
+  // the side gutter beside the picture is wide enough to hold them (otherwise taps on the picture still work as before).
+  function ctlClass(){
+    if(mobPaused) return '';
+    if(state==='PLATFORMER') return 'show';
+    if(state==='DESCENT') return 'show m-desc';
+    if(state==='TITLE'||state==='CUTSCENE'||state==='CREDITS'||state==='SKILLTREE'){
+      const r=cv.getBoundingClientRect(), b=parseFloat(tc.style.getPropertyValue('--b'))||64, ir=VV.w-r.right, il=r.left;
+      const wantPad=(state==='CUTSCENE'&&!!choice)&&il>=b*3+30;
+      if(ir<b+30) return wantPad?'show m-choice m-hideR':'';
+      return wantPad?'show m-choice':'show m-menu';
     }
-    if(mode){   // PICK UP lights up when Pete is in range of an item (same flag that drives the on-screen prompt)
-      const hi=(mode==='PLATFORMER')&&!!pickupPrompt;
+    return '';
+  }
+  mobTick=function(){
+    const key=mobPaused?'':(state+(state==='CUTSCENE'&&choice?'C':''));
+    if(key!==curMode){
+      curMode=key; releaseAll(); applyView();
+      tc.className=ctlClass();
+    }
+    if(tc.classList.contains('show')){   // Y (pick up) lights up when Pete is in range of an item (same flag that drives the on-screen prompt)
+      const hi=(state==='PLATFORMER')&&!!pickupPrompt;
       if(hi!==curHi){ curHi=hi; bUse.el.classList.toggle('hi',hi); }
     }
   };
@@ -6810,10 +6881,10 @@ function loop(now){
   if(state==='TITLE')drawTitle();else if(state==='CUTSCENE')drawCutscene();
   else if(state==='PLATFORMER'){ if(timeFall)drawTimeFall(); else drawPlatformer();
     if(levelFadeIn>0){ ctx.fillStyle='rgba(0,0,0,'+(levelFadeIn/LEVEL_FADE_FRAMES)+')'; ctx.fillRect(0,0,W,PLAYFIELD_BOTTOM); levelFadeIn--; }
-    drawLevelTimer(); }
+    ctx.save(); ctx.translate(0,VIEW_TOP); drawLevelTimer(); ctx.restore(); }   // HUD rides the top of the (possibly cropped) view
   else if(state==='DESCENT')drawDescent();else if(state==='CREDITS')drawCredits();
   else if(state==='SKILLTREE')drawSkillTree();
-  if(muteShown()) drawMuteBtn();   // mute speaker whenever music plays
+  if(muteShown()){ ctx.save(); ctx.translate(0,VIEW_TOP); drawMuteBtn(); ctx.restore(); }   // mute speaker whenever music plays
   if(state!=='SKILLTREE'){      // the skill tree uses the full 900x620 canvas: no bottom text panel
     drawPanelBase();
     if(state==='CUTSCENE'&&choice) drawChoice();
