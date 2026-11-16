@@ -4371,10 +4371,30 @@ const RARITY={
 };
 function rarityOf(it){ return RARITY[it&&it.rarity] || RARITY.junk; }
 let pickupPrompt=false;
-// ---- LEVEL 1 COUNTDOWN (1:15, frame-based @60fps cap). Ticks only in updatePlatformer, so it is
+// ---- LEVEL 1 COUNTDOWN (1:00, frame-based @60fps cap). Ticks only in updatePlatformer, so it is
 // frozen in every other state and stops for good once Pete commits to the subway stairs. At 0 the
 // world drops away (TIME-OUT FALL, vertigo), then the level restarts through initLevel(). ----
-const LEVEL_TIME_FRAMES=75*60;      // 1:15
+const LEVEL_TIME_FRAMES=60*60;      // 1:00
+// START ALERT: pops in at every level start (cutscene entry + timer-out restart), stays, blinks, gone. Frame-based @60fps cap.
+const START_ALERT_MSG="You have one minute to find an entrance!";
+const SA_POP=12, SA_BLINK_AT=118, SA_END=182;   // pop-in frames | blink starts | gone (~3.0 s total)
+let startAlert=0;                   // frames since level start (counts up in updatePlatformer)
+function drawStartAlert(){
+  const f=startAlert; if(f>=SA_END || timeFall || enteringSub) return;
+  if(f>=SA_BLINK_AT && Math.floor((f-SA_BLINK_AT)/8)%2===1) return;   // blink off phase
+  const p=Math.min(1,f/SA_POP), e=1-Math.pow(1-p,3), sc=0.6+0.4*e;
+  const sz=Math.max(20,Math.min(30,W/30)), pad=18;
+  const cx=W/2, cy=(PLAYFIELD_BOTTOM-VIEW_TOP)*0.36;
+  ctx.save(); ctx.globalAlpha=Math.min(1,p*1.4);
+  ctx.font='bold '+sz+'px Trebuchet MS'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const tw=Math.min(ctx.measureText(START_ALERT_MSG).width, W-80), bw=tw+pad*2, bh=sz+pad*1.4;
+  ctx.translate(cx,cy); ctx.scale(sc,sc);
+  ctx.fillStyle='rgba(0,0,0,.72)'; rr(-bw/2,-bh/2,bw,bh,12); ctx.fill();
+  ctx.strokeStyle='rgba(255,214,90,.95)'; ctx.lineWidth=2.5; rr(-bw/2,-bh/2,bw,bh,12); ctx.stroke();
+  ctx.lineJoin='round'; ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.9)'; ctx.strokeText(START_ALERT_MSG,0,1,tw);
+  ctx.fillStyle='#ffe9a8'; ctx.fillText(START_ALERT_MSG,0,1,tw);
+  ctx.restore();
+}
 const TIMEFALL_LEN=170;             // frames of falling before the restart
 let levelTimer=LEVEL_TIME_FRAMES;   // frames remaining
 let timeFall=null;                  // {t} while the time-out fall plays, else null
@@ -4544,7 +4564,7 @@ function initLevel(){
   // CAR set-piece in the breather stretch (after the late ravine ~2840, before the final pile ~3600)
   car={ x:3020, depth:0.45, phase:'wait', t:0 };
   enteringSub=null;   // reset subway entry lead-in
-  levelTimer=LEVEL_TIME_FRAMES; timeFall=null; peteGlow=0;   // countdown restarts at 1:15 with every fresh level start
+  levelTimer=LEVEL_TIME_FRAMES; timeFall=null; peteGlow=0; startAlert=0;   // countdown restarts at 1:00 + start alert replays with every fresh level start
   pete.y=depthY(0)-pete.h;camX=0;
   showBox("← → move   •   ↑ / ↓ move in depth   •   Space jump ravines   •   R punch · F kick   •   E pick up.");
 }
@@ -4718,6 +4738,7 @@ function updatePlatformer(){
   // LEVEL COUNTDOWN / TIME-OUT FALL: gameplay is frozen while the fall plays; then the level restarts.
   if(timeFall){ peteGlow=0; if(++timeFall.t>=TIMEFALL_LEN+20) restartLevelAfterTimeout(); return; }
   if(peteGlow>0) peteGlow--;
+  if(startAlert<SA_END) startAlert++;
   if(!enteringSub && levelTimer>0 && --levelTimer<=0){ levelTimer=0; timeFall={t:0}; cancelAttack(); return; }
   // keep the rig/input clock current in the UPDATE pass (input resolution runs here, not in draw)
   perf2 = (typeof performance!=='undefined') ? performance.now() : (perf2+16);
@@ -7040,7 +7061,7 @@ function loop(now){
   if(state==='TITLE')drawTitle();else if(state==='CUTSCENE')drawCutscene();
   else if(state==='PLATFORMER'){ if(timeFall)drawTimeFall(); else drawPlatformer();
     if(levelFadeIn>0){ ctx.fillStyle='rgba(0,0,0,'+(levelFadeIn/LEVEL_FADE_FRAMES)+')'; ctx.fillRect(0,0,W,PLAYFIELD_BOTTOM); levelFadeIn--; }
-    ctx.save(); ctx.translate(0,VIEW_TOP); drawLevelTimer(); ctx.restore(); }   // HUD rides the top of the (possibly cropped) view
+    ctx.save(); ctx.translate(0,VIEW_TOP); drawLevelTimer(); drawStartAlert(); ctx.restore(); }   // HUD rides the top of the (possibly cropped) view
   else if(state==='DESCENT')drawDescent();else if(state==='CREDITS')drawCredits();
   else if(state==='SKILLTREE')drawSkillTree();
   if(muteShown()){ ctx.save(); ctx.translate(0,VIEW_TOP); drawMuteBtn(); ctx.restore(); }   // mute speaker whenever music plays
