@@ -86,6 +86,7 @@ const GAME_H=430;              // game viewport height (everything gameplay draw
 const PANEL_Y=GAME_H+8;        // text panel starts below a small gap
 const PANEL_H=H-PANEL_Y;       // dedicated text/dialog panel
 let state='TITLE',t=0;
+const inPlay=()=>state==='PLATFORMER'||state==='LEVEL2';   // 7.0: both gameplay states share Pete's physics/input/touch layout
 const keys={};
 // held-direction helpers: arrow key or WASD (boolean use only)
 const kHeldL=()=>keys['ArrowLeft']||keys['KeyA'], kHeldR=()=>keys['ArrowRight']||keys['KeyD'];
@@ -97,7 +98,7 @@ addEventListener('keydown',e=>{keys[e.code]=true;
     setState('CUTSCENE');cutPhase='intro';introStep=0;cut=0;yellCount=0;showBox(introBeats[0]);return;
   }
   // SPACE on the end screen = CONTINUE JOURNEY -> opens the skill tree (Space never restarts the game).
-  if(state==='CREDITS' && e.code==='Space'){ if(!e.repeat) setState('SKILLTREE'); return; }
+  if(state==='CREDITS' && e.code==='Space'){ if(!e.repeat) creditsContinue(); return; }
   // SPACE (or Esc) on the skill tree = CONTINUE (placeholder destination: ST_NEXT_STATE).
   if(state==='SKILLTREE'){ if((e.code==='Space'||e.code==='Escape')&&!e.repeat) skillTreeAdvance(); return; }
   if(state==='CUTSCENE'){
@@ -112,12 +113,13 @@ addEventListener('keydown',e=>{keys[e.code]=true;
   // ATTACK INPUT (gameplay only): R = punch, F = kick, each tap/double-tap/hold. Derive a true
   // press-edge from prevR/prevF latches (NOT the auto-repeating keys[] map) so held keys don't
   // retrigger. Feeds the ported lab resolver (keyDown fires the double-tap immediately).
-  if(state==='PLATFORMER' && pete && !enteringSub && !timeFall){
+  if(state==='LEVEL2' && LV) l2Key(e);   // Level 2: E interact/confirm, Space/Enter confirm dialog + end card (a confirm Space never becomes a jump)
+  if(inPlay() && pete && !enteringSub && !timeFall && !l2Locked()){
     if(e.code==='KeyR' && !prevR){ prevR=true; atkKeyDown(pete.rin,'punch','rin'); }
     if(e.code==='KeyF' && !prevF){ prevF=true; atkKeyDown(pete.fin,'kick','fin'); }
   }});
 let prevR=false, prevF=false;   // R/F physical press-edge latches (cleared on keyup)
-addEventListener('keyup',e=>{ keys[e.code]=false;
+addEventListener('keyup',e=>{ keys[e.code]=false; if(e.code==='Space'&&LV) LV.spaceHeld=false;
   if(e.code==='KeyR'){ prevR=false; if(pete) atkKeyUp(pete.rin); }
   if(e.code==='KeyF'){ prevF=false; if(pete) atkKeyUp(pete.fin); }
 });
@@ -290,7 +292,94 @@ function startDescentMusic(){
 function stopDescentMusic(){ _ddOn=false; try{ if(_ddSeq) _ddSeq.stop(); if(window.Tone) Tone.Transport.stop(); }catch(e){} }
 
 // Stop every music engine (used on state changes so only one plays at a time; they share the Transport).
-function stopAllMusic(){ stopMusic(); stopDescentMusic(); }
+function stopAllMusic(){ stopMusic(); stopDescentMusic(); stopLevel2Music(); }
+
+// =====================================================================
+// LEVEL 2 MUSIC — v5 engine (Tone.js, inlined above). ORIGINAL dark action theme, ported from
+// MUSIC/LEVEL2/level2_v5.html with the audition sliders baked at the file defaults: tempo 146, swing 4%,
+// volume 78%, grit 58%, darkness 70%, lead 85%. Form: INTRO (1 bar, plays once per page session), then the
+// loop body bars 1-6 = A (4 bars) : B (2 bars). Own Tone.Loop; shares the Transport (states never overlap).
+// =====================================================================
+let _m2On=false, _m2Built=false, _m2Nodes={}, _m2Seq=null, _m2Step=0, _m2IntroPlayed=false;
+const _M2_TEMPO=146, _M2_TOTAL=112, _M2_LOOP_START=16, _M2_VOL=0.39 /* 0.78 x 0.5 = -6 dB: Level 2 polish, Michael asked for half volume (this track only) */, _M2_GRIT=0.58, _M2_DARK=0.70, _M2_LEAD=0.85;
+function initLevel2Music(){
+  if(_m2Built || typeof Tone==='undefined') return;
+  try{
+    _m2Built=true;
+    const drive=new Tone.Distortion(0.12+_M2_GRIT*0.6);
+    const darkFilt=new Tone.Filter(7000,'lowpass');
+    const width=new Tone.Chorus({frequency:0.6,delayTime:3.5,depth:0.5,wet:0.25}).start();
+    const verb=new Tone.Reverb({decay:3.4,wet:0.26});
+    const out=new Tone.Gain(musicMuted?0:_M2_VOL).toDestination();
+    drive.connect(darkFilt); darkFilt.connect(width); width.connect(verb); verb.connect(out);
+    _m2Nodes.out=out; _m2Nodes.drive=drive; _m2Nodes.darkFilt=darkFilt;
+    const leadDelay=new Tone.PingPongDelay({delayTime:'8n.',feedback:0.26,wet:0.22}).connect(verb);
+    const lead=new Tone.MonoSynth({oscillator:{type:'fatsawtooth',count:3,spread:24},filter:{type:'lowpass',Q:3},
+      envelope:{attack:0.014,decay:0.2,sustain:0.55,release:0.2},
+      filterEnvelope:{attack:0.014,decay:0.2,sustain:0.5,release:0.16,baseFrequency:360,octaves:2.2}})
+      .connect(leadDelay); lead.connect(drive);
+    lead.volume.value=-4;
+    const rhythm=new Tone.PolySynth(Tone.Synth,{oscillator:{type:'fatsawtooth',count:3,spread:28},
+      envelope:{attack:0.004,decay:0.16,sustain:0.22,release:0.12}}).connect(drive); rhythm.volume.value=-13;
+    const bass=new Tone.MonoSynth({oscillator:{type:'sawtooth'},filter:{type:'lowpass',Q:3},
+      envelope:{attack:0.004,decay:0.16,sustain:0.5,release:0.1},
+      filterEnvelope:{attack:0.004,decay:0.12,sustain:0.35,release:0.1,baseFrequency:140,octaves:2.6}}).connect(drive); bass.volume.value=-4;
+    const sub=new Tone.MonoSynth({oscillator:{type:'sine'},envelope:{attack:0.006,decay:0.28,sustain:0.55,release:0.18}}).connect(out); sub.volume.value=-5;
+    const kick=new Tone.MembraneSynth({pitchDecay:0.035,octaves:7,envelope:{attack:0.001,decay:0.4,sustain:0,release:0.1}}).connect(out); kick.volume.value=0;
+    const snare=new Tone.NoiseSynth({noise:{type:'pink'},envelope:{attack:0.001,decay:0.18,sustain:0}}).connect(new Tone.Filter(1400,'highpass').connect(out)); snare.volume.value=-5;
+    const snareBody=new Tone.MembraneSynth({pitchDecay:0.02,octaves:2,envelope:{attack:0.001,decay:0.12,sustain:0}}).connect(out); snareBody.volume.value=-9;
+    const hat=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.001,decay:0.03,sustain:0}}).connect(new Tone.Filter(9000,'highpass').connect(out)); hat.volume.value=-16;
+    const tom=new Tone.MembraneSynth({pitchDecay:0.055,octaves:4,envelope:{attack:0.001,decay:0.3,sustain:0,release:0.1}}).connect(out); tom.volume.value=-5;
+    const crash=new Tone.NoiseSynth({noise:{type:'white'},envelope:{attack:0.001,decay:1.4,sustain:0}}).connect(new Tone.Filter(4500,'highpass').connect(verb)); crash.volume.value=-9;
+    const MOTIF_A=['E3',null,null,null, 'G3',null,null,null, 'D3',null,null,null, 'A3',null,null,null];
+    const MOTIF_B=['C3',null,null,null, 'Eb3',null,null,null, 'Bb2',null,null,null, 'F3',null,null,null];
+    const BASS_A =['E1','E1','E1','E1', 'G1','G1','G1','G1', 'D1','D1','D1','D1', 'A1','A1','A1','A1'];
+    const BASS_B =['C1','C1','C1','C1', 'Eb1','Eb1','Eb1','Eb1', 'Bb0','Bb0','Bb0','Bb0', 'F1','F1','F1','F1'];
+    const CHORD_A=['E2',null,null,null, 'G2',null,null,null, 'D2',null,null,null, 'A2',null,null,null];
+    const CHORD_B=['C2',null,null,null, 'Eb2',null,null,null, 'Bb1',null,null,null, 'F2',null,null,null];
+    _m2Seq=new Tone.Loop((time)=>{
+     try{
+      const s=_m2Step%_M2_TOTAL, bar=Math.floor(s/16), b=s%16;
+      const isIntro=(bar===0), isA=(bar>=1&&bar<=4), isB=(bar>=5&&bar<=6), groove=isA||isB;
+      if(isIntro){
+        if(b===0){ crash.triggerAttackRelease('1n',time,0.8); rhythm.triggerAttackRelease(['E2','B2'],'2n',time,0.9); sub.triggerAttackRelease('E0','2n',time,0.9); bass.triggerAttackRelease('E1','2n',time,0.9); }
+        if(b>=8 && b%2===0) tom.triggerAttackRelease(['E2','D2','E2','G2'][Math.min(3,(b-8)/2)],'16n',time,0.6+(b-8)*0.04);
+        if(b===15) crash.triggerAttackRelease('1n',time,0.9);
+        _m2Step++; if(_m2Step>=_M2_TOTAL) _m2Step=_M2_LOOP_START; return;
+      }
+      if(groove){
+        if(b%4===0) kick.triggerAttackRelease('C1','8n',time,0.95);
+        if(b%8===4){ snare.triggerAttackRelease('16n',time,1.0); snareBody.triggerAttackRelease('D2','16n',time,0.7); }
+        if(b%2===0) hat.triggerAttackRelease('16n',time,0.4);
+      }
+      if(bar===5 && b===0) crash.triggerAttackRelease('2n',time,0.6);
+      if(bar===1 && b===0){ darkFilt.frequency.cancelScheduledValues(time); darkFilt.frequency.linearRampToValueAtTime(9000-_M2_DARK*7000,time+0.15); }
+      if(groove){
+        const ch=isB?CHORD_B[b]:CHORD_A[b], bn=isB?BASS_B[b]:BASS_A[b];
+        if(ch) rhythm.triggerAttackRelease([ch,Tone.Frequency(ch).transpose(7)],'8n',time,0.8);
+        if(bn){ bass.triggerAttackRelease(bn,'16n',time,0.9); if(b%4===0) sub.triggerAttackRelease(Tone.Frequency(bn).transpose(-12),'8n',time,0.8); }
+        const ln=isB?MOTIF_B[b]:MOTIF_A[b];
+        if(ln) lead.triggerAttackRelease(ln,'4n',time,0.6+_M2_LEAD*0.4);
+      }
+      _m2Step++; if(_m2Step>=_M2_TOTAL) _m2Step=_M2_LOOP_START;
+     }catch(err){ _m2Step++; if(_m2Step>=_M2_TOTAL) _m2Step=_M2_LOOP_START; }
+    },'16n');
+    _m2Seq.iterations=Infinity;
+  }catch(e){ _m2Built=false; }   // audio unavailable: the game runs silent, no crash
+}
+function startLevel2Music(){
+  if(_m2On || typeof Tone==='undefined') return;
+  initLevel2Music(); if(!_m2Built) return;
+  try{
+    _toneResume();
+    Tone.Transport.bpm.value=_M2_TEMPO; Tone.Transport.swing=0.04; Tone.Transport.swingSubdivision='16n';
+    _m2Step = _m2IntroPlayed ? _M2_LOOP_START : 0;   // intro ONCE per page session; later entries start on the A/B loop body
+    _m2IntroPlayed=true;
+    _m2On=true;
+    _m2Seq.start(0); Tone.Transport.start();
+  }catch(e){ _m2On=false; }
+}
+function stopLevel2Music(){ _m2On=false; try{ if(_m2Seq) _m2Seq.stop(); if(window.Tone) Tone.Transport.stop(); }catch(e){} }
 
 // =====================================================================
 // GRUMBLE SFX — Pete's wordless muttering as he walks through the building (cutscene fetch beat 1,
@@ -765,6 +854,7 @@ function toggleMute(){
   musicMuted=!musicMuted;
   if(_mNodes.out) _mNodes.out.gain.rampTo(musicMuted?0:0.55,0.08);
   if(_ddNodes.out) _ddNodes.out.gain.rampTo(musicMuted?0:0.6,0.08);
+  if(_m2Nodes.out) _m2Nodes.out.gain.rampTo(musicMuted?0:_M2_VOL,0.08);
   if(_grNodes.out) _grNodes.out.gain.rampTo(musicMuted?0:_GR_VOL,0.08);
   if(_catN.out) _catN.out.gain.rampTo(musicMuted?0:0.8,0.08);
   if(_colN.out) _colN.out.gain.rampTo(musicMuted?0:0.82,0.08);
@@ -773,7 +863,7 @@ function toggleMute(){
 // small speaker button rect, top-right of the game viewport
 const muteBtn={x:W-34,y:10,w:24,h:20};
 // click hit-test (canvas coords). Desktop: original +/-6px. Touch: the icon is drawn 1.4x bigger (see drawMuteBtn) with a roomy tap area.
-function muteShown(){ return state==='PLATFORMER'||state==='DESCENT'||state==='CREDITS'||state==='SKILLTREE'; }
+function muteShown(){ return inPlay()||state==='DESCENT'||state==='CREDITS'||state==='SKILLTREE'; }
 function muteHit(mx,my){
   if(!TOUCH) return mx>muteBtn.x-6 && mx<muteBtn.x+muteBtn.w+6 && my>muteBtn.y-6 && my<muteBtn.y+muteBtn.h+6;
   return mx>W-52-14 && mx<=W+2 && my>=VIEW_TOP && my<VIEW_TOP+6+39+14;   // VIEW_TOP: the icon rides the top of the cropped widescreen view
@@ -810,12 +900,13 @@ function setState(s){
   // screen). If it's already running, leave it; otherwise CREDITS is silent.
   if(s==='CREDITS'){
     stopMusic();                               // stop Level 1, but DON'T stop the descent cue
-    state=s;t=0; return;
+    state=s;t=0; return;   // (Level 2's end stops its own music in l2Finish before it gets here)
   }
   peteGlow=0;                                  // no pickup glow carries across states
   stopAllMusic();                              // stops the descent cue too (they share Tone.Transport)
   if(s==='SKILLTREE'){ stOpen=null; stFig=null; startMusic(); }   // skill tree: Level 1 music for now
   if(s==='PLATFORMER') startMusic();
+  else if(s==='LEVEL2') startLevel2Music();     // Level 2: v5 dark action theme
   else if(s==='DESCENT') startDescentMusic();   // CUTSCENE is intentionally SILENT (no background bed)
   state=s;t=0;
 }
@@ -1100,7 +1191,7 @@ function drawBox(){
   ctx.fillStyle='#16c79a';rr(x+10,y-2,150,22,6);ctx.fill();
   ctx.fillStyle='#062';ctx.font='bold 13px Trebuchet MS';ctx.textAlign='left';ctx.fillText('SYSTEM MESSAGE',x+20,y+13);
   ctx.font='16px Trebuchet MS';box.lines.forEach((ln,i)=>drawLineSegments(ln, x+18, y+42+i*22, '#e8f8f2'));
-  ctx.fillStyle='#7fd4ff';ctx.font='12px Trebuchet MS';ctx.textAlign='right';ctx.fillText('▶ space / click',x+w-14,y+bh-12);ctx.textAlign='left';
+  if(!box._l2h){ ctx.fillStyle='#7fd4ff';ctx.font='12px Trebuchet MS';ctx.textAlign='right';ctx.fillText('▶ space / click',x+w-14,y+bh-12);ctx.textAlign='left'; }   // the Level 2 hint is not a click-to-dismiss message
 }
 
 // =====================================================================
@@ -3618,6 +3709,7 @@ function petePose(o){
   }
   if(o.wave)  return poseIdleDir('S', (perf2%3200)/3200);   // wave idle
   if(o.guard) return poseIdleDir('D', (perf2%3200)/3200);   // guard idle (fists up)
+  if(o.back)  return poseIdleDir('W', (perf2%3200)/3200);   // back idle: Level 2 spawn close-up, Pete looking down the hall (cleared on first input)
   if(o.hipsYell) return poseHipsYell((perf2%2400)/2400);    // stern hands-on-hips yell
 
   // guard: on title screen pete is not yet initialized — safe idle fallback
@@ -3716,6 +3808,22 @@ function drawPete(cx,feetY,s,o={}){
   // SQUASH & STRETCH: jump/attack poses carry `_stretch` (vertical scale), volume-preserving.
   if(stv!==1) ctx.scale(1/Math.sqrt(stv), stv);
   drawCharacter(pose, {items:new Set(o.jacket?['jacket','boxers']:['boxers']), cat:!!(o.cat), deferFront:!!o.deferFront});
+  if(o.footGoo>0.01){                                    // Level 2 (demo drawPete): green splatter on the stomping (far) foot, fades slowly
+    // o.footGoo = stuck-goo level 0..4 (+1 per kill, fades 1 per ~15 s). More level = more blobs on the far foot, then the near foot, plus drips.
+    const SKg=solve(pose), gk=o.footGoo, drawBlob=(x,y,r)=>{ ctx.fillStyle='#2e6a16'; ctx.beginPath(); ctx.arc(x,y,r+0.8,0,7); ctx.fill(); ctx.fillStyle='#86e84a'; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); };
+    const GOO_EXTRA=[[.15,.5,2.6],[.55,.3,2.2],[.8,.7,2.4],[.35,.9,1.9],[.95,.4,2.0],[.05,.85,2.2],[.65,.95,1.8],[.45,.1,2.3],[.85,.15,1.7]];
+    const gooFoot=(f,lvl,drips)=>{
+      const sp=[[f.ankle.x+5,f.ankle.y-3,3.4],[f.ball.x,f.ball.y-2,3.8],[f.toe.x-1,f.toe.y-3,2.8],[f.ankle.x-3,f.ankle.y-6,2.6],[f.ball.x-4,f.ball.y+1,2.3]];
+      const nx=Math.min(GOO_EXTRA.length,Math.round((lvl-1)*3.4));
+      for(let i=0;i<nx;i++){ const e=GOO_EXTRA[i]; sp.push([f.ankle.x+(f.toe.x-f.ankle.x)*e[0]+1,f.ankle.y-7+e[1]*9,e[2]]); }
+      for(const p of sp) drawBlob(p[0],p[1],p[2]);
+      if(drips){ const nd=Math.min(3,Math.floor(lvl)); for(let i=0;i<nd;i++){ const dx=f.ankle.x+(f.toe.x-f.ankle.x)*(0.2+0.3*i), dy=f.ankle.y+3+((perf2*0.004+i*1.7)%1)*3; drawBlob(dx,dy,1.1+0.3*i); } }
+    };
+    ctx.globalAlpha=Math.min(1,gk*1.6);
+    gooFoot(SKg.footFar,Math.min(gk,4),gk>1);
+    if(gk>1.3){ ctx.globalAlpha=Math.min(1,(gk-1)*1.4); gooFoot(SKg.footNear,Math.min(gk-0.3,4),gk>2); }   // from the 2nd kill the other shoe is stuck too
+    ctx.globalAlpha=1;
+  }
   ctx.restore();
 }
 // Exact screen point of the ported rig's NEAR shoulder (where Biscuit perches). Recomputed from
@@ -4580,6 +4688,598 @@ function restartLevelAfterTimeout(){
   puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false;
   initLevel(); levelFadeIn=LEVEL_FADE_FRAMES;
 }
+// =====================================================================
+// LEVEL FRAMEWORK (7.0). Level 1 keeps its own hand-built path (initLevel / drawPlatformer); levels from here on are
+// DATA (LEVEL_DEFS) consumed by loadLevel(), with mobs described by the MOB_TYPES table and a spawn list per level.
+// Pete himself is untouched: pose = petePose, attacks = startAttack chain, jump, Biscuit, touch pad. A level only adds its
+// space, its mobs, and the small hooks marked "Level 2" in updatePlatformer / drawPeteSorted / drawPete / the loop.
+//
+// LEVEL 2 is the Level2Hall.html demo (LevelLab/levels/level-2-hallway.level.json) ported as built: a FIXED camera looking down
+// a hallway toward one vanishing point. Space = hall coordinates, in the demo's own world units: X across the hall (left -, right +),
+// z distance from the camera (bigger = farther = higher on the screen and smaller). Pete walks with pete.hx / pete.hz (Up/W raises z).
+// Everything (walls, floor, door, roaches, goo, Pete) is drawn through ONE projection, the demo's proj()/depthScale()/floorY(),
+// inside the HL module below. The demo canvas (960x540) is mapped into the game view by HL.layout(): uniform scale = view height / 540,
+// vanishing point centred horizontally, so the touch widescreen view simply shows more wall at the sides.
+// =====================================================================
+const LEVEL_DEFS={
+  level2:{
+    id:'level2', name:'LEVEL 2 - HOSPITAL HALLWAY',
+    view:{w:960,h:540,vp:{x:480,y:170}},                 // the demo canvas + vanishing point (screen px at 960x540)
+    camera:{eyeH:350,nearZ:300},                         // scale sc = nearZ / z ; floor y = vp.y + eyeH*sc ; x = vp.x + X*sc
+    hall:{halfW:430,ceilH:520,zStart:90,zEnd:1370},      // stem floor spans X -halfW..+halfW; zEnd = far wall of the cross hall
+    junction:{z0:1160,flareZ:1290,flareX:760},           // T-junction at the far end (visual only)
+    play:{xMargin:48,zMin:100,zMax:1310,spawn:{x:0,z:170},lensFrom:1.0,lensTo:3.0,headY:0.44,moveX:7,moveZ:7},   // Pete's feet are clamped to this floor; lens = head zoom between sc lensFrom..lensTo
+    peteH:200,                                           // Pete's height in hall units (screen px = peteH * sc * view scale)
+    door:{z0:790,z1:1030,h:250,reachX:170,reachZ:70,openFrames:50},   // single door on the RIGHT wall, centre z 910; reach = how close Pete must be to interact
+    lights:[{z0:420,z1:520},{z0:640,z1:740},{z0:860,z1:960},{z0:1080,z1:1180},{z0:1250,z1:1330}],   // ceiling light panels
+    hp:5, invul:90,                                      // demo health.max / invulFrames
+    alert:{msg:'FIND YOUR GUIDE', chip:{w:270,h:40,gap:74,y:8}},   // objective.text; chip parks left of the mute button (same gap as Level 1's timer)
+    mobs:[                                               // orbit centre (x,z) in hall units, radius r (z radius = 0.7 r), dir = +1 / -1 around the circle
+      {type:'roach',x:-230,z:470,r:70,dir: 1},           // demo roach 1
+      {type:'roach',x:  40,z:535,r:80,dir:-1},           // demo roach 2
+      {type:'roach',x: 250,z:595,r:65,dir: 1},           // demo roach 3
+      {type:'roach',x: -20,z:1230,r:75,dir:-1}           // NEW 4th roach: back of the hallway (z 1177..1283), just short of the far wall (zEnd 1370)
+    ],
+    hint:{dist:240,frames:300},                          // Pete within this floor distance of a live roach -> "Stomp the roaches!" bubble (once)
+    dialogs:{                                            // verbatim from the demo (CLEAR is the demo's own placeholder)
+      knock:[ {who:'PETE',text:'KNOCK KNOCK, LET ME IN!'}, {who:'DOOR VOICE',text:'What the hell are you doing here?'}, {who:'DOOR VOICE',text:"I can't let you in with mobs around..."} ],
+      clear:[ {who:'PETE',text:'Knock knock again. The mobs are gone!'}, {who:'DOOR VOICE',text:'Okay, the coast is clear. Come in!'} ]
+    },
+    music:'level2'
+  }
+};
+// Mob types. ai 'orbit' = circle the spawn point on the hall floor (the demo's roach AI). A new mob = a row here + a draw function.
+// touch = the demo's contact rule: floor distance hypot(dx, dz*zW) < hitR while Pete's jump height is under airLab (lab units).
+const MOB_TYPES={
+  roach:{ hp:3, ai:'orbit', size:1.15, omega:0.045, dyingFrames:16, footGooFrames:900, touch:{dmg:1,hitR:52,zW:0.8,airLab:25},
+          draw:(m)=>HL.drawRoach(m,MOB_TYPES.roach),
+          onHit:(m,dmg,dir)=>{ l2Burst(m.x,m.z,'dust',5); },
+          onDeath:(m)=>{ l2AddGoo(m.x,m.z); l2Burst(m.x,m.z,'goo',18); } }
+};
+// ONE shared hit table for every player attack, in HALL units. The strike point is P = (pete.hx + face*d, pete.hz); a roach is hit when
+// hypot(roach.x - P.x, (roach.z - P.z)*ATTACK_ZWEIGHT) <= R (so depth reach = R / 0.7). Only the nearest roach per swing is hit.
+// key = set + index (punch0 jab, punch1 step-jab / double-tap slot, punch2 uppercut, kick0 front kick, kick1 side kick, kick2 stomp).
+// dmg is mob HP removed. kick2 is the demo's stomp exactly (stompDx 36, killR 170, zWeight 0.7).
+const ATTACK_REACH={
+  punch0:{d:36,R:110,dmg:1}, punch1:{d:40,R:130,dmg:2}, punch2:{d:30,R:120,dmg:3},
+  kick0: {d:40,R:130,dmg:2}, kick1: {d:45,R:150,dmg:2}, kick2: {d:36,R:170,dmg:3}
+};
+const ATTACK_ZWEIGHT=0.7;
+// ---------------------------------------------------------------------
+// HL = the demo hallway (Level2Hall.html: LEVEL2 config, proj/depthScale/floorY, drawHall, drawDoor, wallSign/makeSign, wingArch,
+// goo, fx, drawRoach, Pete placement) ported as built. Same projection, same drawing code. The only changes: (a) layout() maps the
+// demo's 960x540 canvas into the game view (below), (b) data comes in as arguments (door state, goo, fx, roach record) instead of the
+// demo's globals, (c) the roach reads the mob table, and shows the game's hit flash.
+// Mapping: view = W x (GAME_H - VIEW_TOP) (desktop 900x430; touch widescreen up to 1400 wide, top rows cropped). One uniform scale
+// VK = view height / 540, vanishing point at (W/2, VIEW_TOP + 170*VK). The floor line at z=300 lands 20/540 above the bottom edge,
+// exactly as in the demo. Extra width (900/0.796 = 1130 demo px) just shows more wall; every wall/ceiling/floor polygon runs off-screen.
+// ---------------------------------------------------------------------
+const HL=(function(){
+  const D=LEVEL_DEFS.level2, VD=D.view, CAM=D.camera, HALL=D.hall, JUNC=D.junction, PLAY=D.play, DOOR=D.door, LIGHTS=D.lights;
+  let VK=1, VPX=450, VPY=0, VT=0, VW=900, VH=430;
+  function layout(){ VW=W; VT=VIEW_TOP; VH=GAME_H-VIEW_TOP; VK=VH/VD.h; VPX=VW/2; VPY=VT+VD.vp.y*VK; }
+  layout();
+  // ---- ONE perspective mapping: everything (floor lines, walls, door, roaches, Pete) goes through these ----
+  const rawScale=z=>CAM.nearZ/z;                                             // the demo's own sc (lens + step damping use this)
+  const depthScale=z=>VK*CAM.nearZ/z;                                        // demo depthScale() x view scale
+  const floorY=z=>VPY+CAM.eyeH*depthScale(z);
+  function proj(X,Y,z){ const s=depthScale(z); return { x:VPX+X*s, y:VPY+(CAM.eyeH-Y)*s, s:s }; }
+  const peteScreenScale=z=>depthScale(z)*D.peteH/peteModelH();               // depth -> rig-to-screen scale (demo peteScreenScale)
+  function xLimit(z){ return Math.min(HALL.halfW-PLAY.xMargin,(VW/2-70*VK)/depthScale(z)); }   // close to the lens only the visible floor width is walkable
+  function polyPts(p,fill,stroke,lw){
+    ctx.beginPath(); for(let i=0;i<p.length;i++){ if(i) ctx.lineTo(p[i].x,p[i].y); else ctx.moveTo(p[i].x,p[i].y); } ctx.closePath();
+    if(fill){ ctx.fillStyle=fill; ctx.fill(); } if(stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=lw||1; ctx.stroke(); }
+  }
+  function wallPts(side,z0,z1,y0,y1){ const X=side*HALL.halfW; return [proj(X,y1,z0),proj(X,y1,z1),proj(X,y0,z1),proj(X,y0,z0)]; }
+  function wallRect(side,z0,z1,y0,y1,fill,stroke,lw){ polyPts(wallPts(side,z0,z1,y0,y1),fill,stroke,lw); }
+  function flatPts(Y,x0,x1,z0,z1){ return [proj(x0,Y,z0),proj(x1,Y,z0),proj(x1,Y,z1),proj(x0,Y,z1)]; }
+  function seg(a,b,col,lw){ ctx.strokeStyle=col; ctx.lineWidth=lw||1; ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke(); }
+  function vq(x0,z0,x1,z1,y0,y1,fill,stroke,lw){ polyPts([proj(x0,y1,z0),proj(x1,y1,z1),proj(x1,y0,z1),proj(x0,y0,z0)],fill,stroke,lw); }   // vertical quad between two floor points
+  function halfWAt(z){ return z<=JUNC.z0 ? HALL.halfW : z>=JUNC.flareZ ? JUNC.flareX : HALL.halfW+(JUNC.flareX-HALL.halfW)*(z-JUNC.z0)/(JUNC.flareZ-JUNC.z0); }
+  function outlinePts(Y){ const hw=HALL.halfW, j=JUNC, ze=HALL.zEnd;   // floor / ceiling outline: stem, then the splayed cross hall
+    return [[-hw,HALL.zStart],[hw,HALL.zStart],[hw,j.z0],[j.flareX,j.flareZ],[j.flareX,ze],[-j.flareX,ze],[-j.flareX,j.flareZ],[-hw,j.z0]].map(p=>proj(p[0],Y,p[1])); }
+  // ---- perspective-correct wall sign: a pre-rendered text canvas drawn in vertical strips along the wall plane via proj() ----
+  function makeSign(text,w,h,draw){ const c=document.createElement('canvas'); c.width=w; c.height=h; const g=c.getContext('2d'); draw(g,text,w,h); return c; }
+  function wallSign(side,img,z0,z1,y0,y1){            // y0 = bottom, y1 = top (world Y); z0..z1 along the wall
+    const X=side*HALL.halfW, n=img.width;
+    for(let i=0;i<n;i++){
+      const fa=side>0?1-i/n:i/n, fb=side>0?1-(i+1)/n:(i+1)/n;   // right wall: reading left-to-right runs far -> near
+      const za=z0+(z1-z0)*fa, zb=z0+(z1-z0)*fb;
+      const a=proj(X,y1,za), b=proj(X,y1,zb), c=proj(X,y0,za);
+      ctx.drawImage(img,i,0,1,img.height,a.x,a.y,Math.abs(b.x-a.x)+0.8,c.y-a.y);
+    }
+  }
+  const SIGN_GUIDE=makeSign('GUIDE ROOM',1000,140,(g,t,w,h)=>{
+    g.font='bold 128px Arial, Helvetica, sans-serif'; g.textBaseline='middle'; g.textAlign='center';
+    const k=(w-40)/g.measureText(t).width;
+    g.save(); g.translate(w/2,h/2+6); g.scale(k,1);
+    g.fillStyle='#14262c'; g.fillText(t,5,5);              // painted drop shadow
+    g.fillStyle='#f1f7f4'; g.fillText(t,0,0);              // painted letters
+    g.restore();
+  });
+  const SIGN_104=makeSign('104',160,90,(g,t,w,h)=>{
+    g.fillStyle='#dfe8e5'; g.fillRect(0,0,w,h); g.strokeStyle='#51605e'; g.lineWidth=6; g.strokeRect(3,3,w-6,h-6);
+    g.fillStyle='#1d3a46'; g.font='bold 62px Arial, Helvetica, sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(t,w/2,h/2+4);
+  });
+  const SIGN_EXIT=makeSign('EXIT',120,50,(g,t,w,h)=>{
+    g.fillStyle='#0d3a22'; g.fillRect(0,0,w,h); g.fillStyle='#6dffa6'; g.font='bold 34px Arial, Helvetica, sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(t,w/2,h/2+2);
+  });
+  const signWing=(t)=>makeSign(t,200,50,(g,tt,w,h)=>{
+    g.fillStyle='#12303a'; g.fillRect(0,0,w,h); g.strokeStyle='#8fd6cf'; g.lineWidth=3; g.strokeRect(2,2,w-4,h-4);
+    g.fillStyle='#e9fbf6'; g.font='bold 28px Arial, Helvetica, sans-serif'; g.textAlign='center'; g.textBaseline='middle'; g.fillText(tt,w/2,h/2+2);
+  });
+  const SIGN_WARDS=signWing('\u25C4 WARDS'), SIGN_LABS=signWing('LABS \u25BA');
+  function noticeBoard(side,z0,z1,y0,y1){                // plain framed notice: white sheet with grey text lines
+    wallRect(side,z0,z1,y0,y1,'#2b3534');
+    const pz=(z1-z0)*0.1, py=(y1-y0)*0.08;
+    wallRect(side,z0+pz,z1-pz,y0+py,y1-py,'#e3e9e5');
+    wallRect(side,z0+pz*2,z1-pz*2,y1-py-18,y1-py-9,'#55615f');
+    for(let y=y1-py-34;y>y0+py+10;y-=13) wallRect(side,z0+pz*2,z1-pz*(2+((y|0)%3)),y,y+5,'#98a3a0');
+  }
+  function sanitizer(side,z,y){                            // wall-mounted hand sanitizer dispenser
+    wallRect(side,z,z+26,y,y+46,'#dfe7e5','#59706d',1);
+    wallRect(side,z+4,z+22,y+24,y+40,'#4aa3c8');
+    wallRect(side,z+9,z+17,y+6,y+14,'#8a9896');
+  }
+  // painted view into a side wing, set into the splayed corner wall (a simple receding-corridor panel, clipped to the arch)
+  function wingArch(side){
+    const hw=HALL.halfW, j=JUNC, t0=0.16, t1=0.84, hh=285;
+    const pa={x:hw+(j.flareX-hw)*t0,z:j.z0+(j.flareZ-j.z0)*t0}, pb={x:hw+(j.flareX-hw)*t1,z:j.z0+(j.flareZ-j.z0)*t1};
+    const q=[proj(side*pa.x,hh,pa.z),proj(side*pb.x,hh,pb.z),proj(side*pb.x,0,pb.z),proj(side*pa.x,0,pa.z)];
+    polyPts([proj(side*(pa.x-8),hh+14,pa.z),proj(side*(pb.x+8),hh+14,pb.z),proj(side*(pb.x+8),0,pb.z),proj(side*(pa.x-8),0,pa.z)],'#26302f');   // door frame
+    const xs=q.map(p=>p.x), ys=q.map(p=>p.y), x0=Math.min(...xs), x1=Math.max(...xs), y0=Math.min(...ys), y1=Math.max(...ys), w=x1-x0, h=y1-y0;
+    const u0=side>0?x0+w*0.5:x0+w*0.12, u1=side>0?x1-w*0.12:x0+w*0.5, v0=y0+h*0.28, v1=y0+h*0.62;
+    ctx.save(); ctx.beginPath(); q.forEach((p,i)=>{ i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); }); ctx.closePath(); ctx.clip();
+    ctx.fillStyle='#cfe9e3'; ctx.fillRect(x0,y0,w,h);
+    const T=(a,b,c,d,f)=>polyPts([{x:a[0],y:a[1]},{x:b[0],y:b[1]},{x:c[0],y:c[1]},{x:d[0],y:d[1]}],f);
+    T([x0,y0],[x1,y0],[u1,v0],[u0,v0],'#4d6266');                     // ceiling
+    T([x0,y1],[x1,y1],[u1,v1],[u0,v1],'#7fa09d');                     // floor
+    T([x0,y0],[u0,v0],[u0,v1],[x0,y1],side>0?'#86a8a2':'#6f918c');   // left side wall
+    T([x1,y0],[u1,v0],[u1,v1],[x1,y1],side>0?'#6f918c':'#86a8a2');   // right side wall
+    ctx.fillStyle='#e8fbf6'; ctx.fillRect(u0,v0,u1-u0,v1-v0);   // bright far end of the wing
+    ctx.fillStyle='#7ea6a0'; ctx.fillRect(u0+(u1-u0)*0.3,v0+(v1-v0)*0.25,(u1-u0)*0.4,(v1-v0)*0.75);   // a door at the end
+    T([x0+w*0.3,y0],[x1-w*0.3,y0],[u1-(u1-u0)*0.2,v0],[u0+(u1-u0)*0.2,v0],'#f4fff8');   // ceiling light
+    ctx.restore();
+    polyPts(q,null,'#26302f',1.5);
+  }
+  function drawHall(){
+    const hw=HALL.halfW, ch=HALL.ceilH, zs=HALL.zStart, ze=HALL.zEnd, j=JUNC, fx2=j.flareX;
+    ctx.fillStyle='#06090a'; ctx.fillRect(0,0,VW,VT+VH);
+    // far wall of the cross hall (flat to the camera): single-leaf exit door + EXIT sign + room plate + wing signs
+    const bl=proj(-fx2,ch,ze), br=proj(fx2,0,ze);
+    const bg=ctx.createLinearGradient(0,bl.y,0,br.y); bg.addColorStop(0,'#5d7774'); bg.addColorStop(1,'#46605e');
+    ctx.fillStyle=bg; ctx.fillRect(bl.x,bl.y,br.x-bl.x,br.y-bl.y);
+    { const a=proj(-fx2,100,ze), b=proj(fx2,0,ze); ctx.fillStyle='#34494a'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // darker wall base
+    { const a=proj(-fx2,106,ze), b=proj(fx2,94,ze); ctx.fillStyle='#c4cfcc'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // handrail
+    { const a=proj(-fx2,160,ze), b=proj(fx2,150,ze); ctx.fillStyle='#3c8c88'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // teal wayfinding band
+    const wd=proj(-44,222,ze), wb=proj(44,0,ze);                                                                                    // ONE leaf, ~88 wide
+    ctx.fillStyle='#26302f'; ctx.fillRect(wd.x-2,wd.y-2,wb.x-wd.x+4,wb.y-wd.y+2);
+    ctx.fillStyle='#8fa6a0'; ctx.fillRect(wd.x,wd.y,wb.x-wd.x,wb.y-wd.y);
+    { const a=proj(-9,190,ze), b=proj(9,120,ze); ctx.fillStyle='#16262c'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // vision slit
+    { const a=proj(-44,30,ze), b=proj(44,0,ze); ctx.fillStyle='#6b7e7b'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }            // kick plate
+    { const a=proj(24,106,ze), b=proj(38,100,ze); ctx.fillStyle='#d7dedc'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // lever
+    { const a=proj(-30,262,ze), b=proj(30,236,ze); ctx.drawImage(SIGN_EXIT,a.x,a.y,b.x-a.x,b.y-a.y); }
+    { const a=proj(62,150,ze), b=proj(88,128,ze); ctx.fillStyle='#dfe8e5'; ctx.fillRect(a.x,a.y,b.x-a.x,b.y-a.y); }          // room plate
+    { const a=proj(-330,300,ze), b=proj(-170,262,ze); ctx.drawImage(SIGN_WARDS,a.x,a.y,b.x-a.x,b.y-a.y); }                    // cross-hall direction signs
+    { const a=proj(170,300,ze), b=proj(330,262,ze); ctx.drawImage(SIGN_LABS,a.x,a.y,b.x-a.x,b.y-a.y); }
+    // ceiling: pale acoustic tile grid + bright fluorescent panels (stem + cross hall)
+    polyPts(outlinePts(ch),'#4f5f63');
+    for(let z=100;z<=ze;z+=90){ const e=halfWAt(z); seg(proj(-e,ch,z),proj(e,ch,z),'rgba(0,0,0,.30)'); }
+    for(let x=-hw+hw/2;x<hw;x+=hw/2) seg(proj(x,ch,zs),proj(x,ch,ze),'rgba(0,0,0,.30)');
+    for(const l of LIGHTS){
+      polyPts(flatPts(ch,-150,150,l.z0-30,l.z1+30),'rgba(210,255,240,.12)');                 // glow
+      polyPts(flatPts(ch,-110,110,l.z0,l.z1),'#f4fff8','#9fb2ae',1);                      // fluorescent panel
+      seg(proj(-36,ch,l.z0),proj(-36,ch,l.z1),'rgba(120,150,145,.7)'); seg(proj(36,ch,l.z0),proj(36,ch,l.z1),'rgba(120,150,145,.7)');
+    }
+    for(const sx of [-1,1]) polyPts(flatPts(ch,sx*450,sx*700,1290,1340),'#f4fff8','#9fb2ae',1);   // cross-hall wing lights
+    // floor: hard glossy linoleum, seams, edge guide lines, light reflections; teal line runs along the cross hall
+    polyPts(outlinePts(0),'#566669');
+    for(let z=120;z<=ze;z+=110){ const e=halfWAt(z); seg(proj(-e,0,z),proj(e,0,z),'rgba(0,0,0,.24)'); }
+    for(let x=-hw+hw/4;x<hw;x+=hw/4) seg(proj(x,0,zs),proj(x,0,ze),'rgba(0,0,0,.2)');
+    for(const sx of [-1,1]){ polyPts(flatPts(0,sx*296,sx*308,zs,j.z0),'#3f8f8c'); }            // subtle teal guide lines
+    polyPts(flatPts(0,-fx2+30,fx2-30,1312,1324),'#3f8f8c');                                    // teal line across the cross hall
+    for(const sx of [-1,1]) polyPts(flatPts(0,sx*(hw-70),sx*hw,zs,j.z0),'rgba(205,235,228,.07)');   // wall-base reflection
+    polyPts(flatPts(0,-55,55,zs,ze),'rgba(255,255,255,.035)');
+    for(const l of LIGHTS){
+      polyPts(flatPts(0,-190,190,l.z0-60,l.z1+150),'rgba(225,255,245,.07)');                // sheen pool
+      polyPts(flatPts(0,-100,100,l.z0-20,l.z1+90),'rgba(240,255,250,.10)');                 // brighter mirror of the panel
+    }
+    // cross hall: splayed corner walls with an arch to each wing, and the short end return walls
+    for(const side of [-1,1]){
+      vq(side*fx2,j.flareZ,side*fx2,ze,0,ch,'#5b7773');                                  // end return wall
+      vq(side*fx2,j.flareZ,side*fx2,ze,0,100,'#34494a');
+      vq(side*hw,j.z0,side*fx2,j.flareZ,0,ch,'#6d8985');                                 // splayed corner wall
+      vq(side*hw,j.z0,side*fx2,j.flareZ,0,100,'#3e5755');
+      vq(side*hw,j.z0,side*fx2,j.flareZ,150,160,'#3c8c88');
+      vq(side*hw,j.z0,side*fx2,j.flareZ,96,106,'#c4cfcc');
+      wingArch(side);
+    }
+    // stem side walls: pale green upper wall, darker dado, teal band, handrail, cove base, seams (end at the junction)
+    for(const side of [-1,1]){
+      wallRect(side,zs,j.z0,0,ch,'#6d8985');
+      wallRect(side,zs,j.z0,ch-34,ch,'rgba(0,0,0,.18)');
+      wallRect(side,zs,j.z0,0,100,'#3e5755');
+      wallRect(side,zs,j.z0,150,160,'#3c8c88');
+      wallRect(side,zs,j.z0,96,106,'#c4cfcc');
+      wallRect(side,zs,j.z0,90,96,'rgba(0,0,0,.35)');
+      wallRect(side,zs,j.z0,0,14,'#1f2a2a');
+      for(let z=120;z<=j.z0;z+=110){ const a=wallPts(side,z,z,14,ch); seg(a[3],a[0],'rgba(0,0,0,.18)'); }
+      for(let z=140;z<=j.z0;z+=220) wallRect(side,z-3,z+3,78,98,'#9aa8a5');                  // handrail brackets
+      for(const l of LIGHTS) if(l.z1+20<=j.z0) wallRect(side,l.z0-20,l.z1+20,200,ch-34,'rgba(235,255,248,.07)');   // light wash on the upper wall
+    }
+    // left wall: framed notice, sanitizer (the gurney is gone: the hall is empty of furniture)
+    noticeBoard(-1,560,650,190,300);
+    sanitizer(-1,1000,118);
+    // right wall: sanitizer, extinguisher, plain framed notice (the door + its plates are drawn in drawDoor)
+    sanitizer(1,520,118);
+    wallRect(1,700,736,70,176,'#b0262b'); wallRect(1,706,730,150,190,'#222');   // fire extinguisher
+    noticeBoard(1,580,640,180,280);
+  }
+  function drawDoor(door){
+    const X=HALL.halfW, z0=DOOR.z0, z1=DOOR.z1, h=DOOR.h, L=z1-z0;
+    wallRect(1,z0-12,z1+12,0,h+12,'#26302f');                           // frame
+    wallSign(1,SIGN_GUIDE,z0-110,z1+110,330,400);                       // GUIDE ROOM painted on the wall above the door
+    wallSign(1,SIGN_104,z1+28,z1+78,150,178);                           // room-number plate beside the door
+    const opening=wallPts(1,z0,z1,0,h);
+    const e=door.state==='closed'?0:(door.t*door.t*(3-2*door.t));
+    if(e===0){
+      polyPts(opening,'#8fa6a0');                                           // ONE single leaf (no centre split)
+      wallRect(1,z0,z1,0,34,'#6b7e7b','#3a4a48',1);                   // kick plate
+      wallRect(1,z0+34,z0+78,130,215,'#16262c','#3a4a48',1);          // tall vision window
+      wallRect(1,z0+38,z0+48,140,205,'rgba(200,230,240,.18)');         // glass gleam
+      wallRect(1,z0+12,z0+46,100,108,'#d7dedc','#59706d',1);          // lever handle
+      polyPts(opening,null,'#26302f',1.5);
+      return;
+    }
+    // open: dark room beyond the doorway, leaf swung inward on the far hinge (clipped to the opening)
+    ctx.save(); ctx.beginPath(); opening.forEach((q,i)=>{ i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y); }); ctx.closePath(); ctx.clip();
+    const o0=opening[0], o1=opening[1];
+    const g=ctx.createLinearGradient(o0.x,0,o1.x,0); g.addColorStop(0,'#26333a'); g.addColorStop(1,'#0a1014');
+    ctx.fillStyle=g; ctx.fillRect(o0.x-4,o0.y-4,o1.x-o0.x+8,opening[2].y-o0.y+8);
+    const fl=proj(X+60,0,z0+L/2); ctx.fillStyle='rgba(190,235,225,.20)'; ctx.fillRect(o0.x,fl.y-8,o1.x-o0.x,40*VK);   // cool light spilling from the room
+    const th=e*86*Math.PI/180, fx3=X+L*Math.sin(th), fz=z1-L*Math.cos(th);
+    polyPts([proj(fx3,h,fz),proj(X,h,z1),proj(X,0,z1),proj(fx3,0,fz)],'#8fa6a0','#3a4a48',1.5);
+    ctx.restore();
+    polyPts(opening,null,'#26302f',2);
+  }
+  // ---- goo piles (flat on the floor, permanent) ----
+  function gooPts(g,k,inner){ const o=[], n=g.rad.length;
+    for(let i=0;i<n;i++){ const t=i/n*Math.PI*2, rr=g.rad[i]*k*(inner?0.8:1); o.push(proj(g.x+Math.cos(t)*rr,0,g.z+Math.sin(t)*rr*0.9)); }
+    return o; }
+  function drawGoo(goos){
+    for(const g of goos){
+      const k=0.3+0.7*ease(clamp(g.age/14,0,1)), c=proj(g.x,0,g.z);
+      polyPts(gooPts(g,k,false),'#2e6a16');                                   // darker rim
+      polyPts(gooPts(g,k,true),'#7ede42');                                    // body
+      ctx.fillStyle='rgba(200,255,150,.55)'; ctx.beginPath(); ctx.ellipse(c.x-9*c.s*k,c.y-4*c.s*k,14*c.s*k,5*c.s*k,0,0,7); ctx.fill();   // wet sheen
+      for(const d of g.drops){ const p=proj(g.x+Math.cos(d.a)*d.d*k,0,g.z+Math.sin(d.a)*d.d*k*0.9), rr=Math.max(1.5,d.r*p.s);
+        ctx.fillStyle='#2e6a16'; ctx.beginPath(); ctx.ellipse(p.x,p.y,rr*1.25,rr*0.8,0,0,7); ctx.fill();
+        ctx.fillStyle='#7ede42'; ctx.beginPath(); ctx.ellipse(p.x,p.y,rr,rr*0.6,0,0,7); ctx.fill(); }
+    }
+  }
+  function drawFx(fx){
+    for(const p of fx){ const q=proj(p.X,p.Y,p.z), dust=p.kind==='dust', rr=Math.max(1.5,(dust?3.6:5)*q.s), a=Math.min(1,p.life/20);
+      ctx.globalAlpha=a; ctx.fillStyle=dust?'#7a6a58':'#2e6a16'; ctx.beginPath(); ctx.arc(q.x,q.y,rr+1,0,7); ctx.fill();
+      ctx.fillStyle=dust?'#d8cdb8':'#86e84a'; ctx.beginPath(); ctx.arc(q.x,q.y,rr,0,7); ctx.fill(); }
+    ctx.globalAlpha=1;
+  }
+  // ---- roach: drawn in FLOOR space (every point goes through proj), so it scales and foreshortens like Pete ----
+  function drawRoach(r,T){
+    const sq=r.state==='dying'?clamp(r.t/T.dyingFrames,0,1):0, hk=1-sq*0.9, wk=1+sq*0.55, SZ=T.size;
+    const c=Math.cos(r.th), sn=Math.sin(r.th), ph=r.leg;
+    const Pp=(u,v,h)=>{ u*=SZ*wk; v*=SZ*wk; return proj(r.x+u*c-v*sn,h*SZ*hk,r.z+u*sn+v*c); };   // local (forward u, left v, height h) -> screen
+    const ell=(cu,cv,au,av,h,n)=>{ const o=[]; for(let i=0;i<n;i++){ const t=i/n*Math.PI*2; o.push(Pp(cu+Math.cos(t)*au,cv+Math.sin(t)*av,h)); } return o; };
+    const s1=Pp(0,0,0).s;
+    polyPts(ell(0,0,54,34,0,18),'rgba(0,0,0,.35)');                                                            // floor shadow
+    ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#25140a';
+    for(let side=-1;side<=1;side+=2) for(let i=0;i<3;i++){                                              // 6 legs, alternating tripod scuttle
+      const u0=24-i*24, fwd=(1-i)*12, swing=sq>0?0:Math.sin(ph+((i+(side>0?0:1))%2)*Math.PI)*12;
+      const hip=Pp(u0,side*16,8), knee=Pp(u0+fwd*0.6+swing*0.5,side*40,18), foot=Pp(u0+fwd+swing,side*58,0);
+      ctx.lineWidth=Math.max(1.5,4.2*s1*SZ); ctx.beginPath(); ctx.moveTo(hip.x,hip.y); ctx.lineTo(knee.x,knee.y); ctx.lineTo(foot.x,foot.y); ctx.stroke();
+    }
+    polyPts(ell(-16,0,38,26,3,20),'#24130a','#14090400',1);                                                 // belly/underside rim
+    polyPts(ell(-16,0,36,24,17,20),'#5a3013','#1d1007',1.2);                                                // abdomen dome
+    polyPts(ell(-12,-10,30,12,20,16),'#7a4520');                                                              // left wing case
+    polyPts(ell(-12,10,30,12,20,16),'#7a4520');                                                               // right wing case
+    polyPts(ell(-6,-10,14,4,22,12),'rgba(235,170,95,.55)'); polyPts(ell(-6,10,14,4,22,12),'rgba(235,170,95,.45)');   // glossy highlights
+    seg(Pp(-50,0,16),Pp(14,0,23),'#1d1007',Math.max(1,2*s1*SZ));                                            // wing seam
+    for(let k=0;k<4;k++) seg(Pp(-40+k*11,-23,18),Pp(-40+k*11,23,18),'rgba(30,14,5,.55)',Math.max(1,1.6*s1*SZ));   // abdomen segments
+    polyPts(ell(22,0,18,22,17,16),'#8a5226','#1d1007',1.2);                                                 // pronotum shield
+    polyPts(ell(23,0,8,10,19,12),'#3a2010');
+    polyPts(ell(42,0,10,12,11,14),'#3a2010','#1d1007',1);                                                   // head
+    for(const sd of [-1,1]){ const e=Pp(47,sd*6,14); ctx.fillStyle='#e9d9a0'; ctx.beginPath(); ctx.arc(e.x,e.y,Math.max(1,2.2*s1*SZ),0,7); ctx.fill(); }   // eyes
+    ctx.lineWidth=Math.max(1,2.4*s1*SZ);                                                                         // antennae, swaying
+    for(const sd of [-1,1]){ const sw=Math.sin(ph*0.6+sd)*10, a=Pp(50,sd*5,13), m=Pp(78,sd*(18+sw),20), t=Pp(98,sd*(36+sw*1.3),9);
+      ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.quadraticCurveTo(m.x,m.y,t.x,t.y); ctx.stroke(); }
+    if(r.flash>0){ const fa='rgba(255,255,255,'+(0.18+0.1*r.flash)+')';                                          // hit flash (the game's non-lethal hit cue)
+      polyPts(ell(-16,0,36,24,17,20),fa); polyPts(ell(22,0,18,22,17,16),fa); polyPts(ell(42,0,10,12,11,14),fa); }
+  }
+  // ---- Pete placement (demo drawPete L3120-3158): foot on the floor line, lens zoom onto the head when close, jump lift ----
+  // airPx = Pete's jump height in game px (ROAD - feet), converted so a jump is the same size RELATIVE TO PETE as in Level 1.
+  function peteFrame(pose,hx,hz,airPx){
+    const S=peteScreenScale(hz), sc=depthScale(hz), sx=VPX+hx*sc, fy=floorY(hz), SK=solve(pose);
+    let gy=fy-6*S;                                                           // sole sits 6 rig units below the ankle -> on the floor line
+    const lk=Math.max(0,Math.min(1,(rawScale(hz)-PLAY.lensFrom)/(PLAY.lensTo-PLAY.lensFrom))), lens=lk*lk*(3-2*lk);
+    if(lens>0) gy=gy*(1-lens)+(VT+VH*PLAY.headY-SK.head.y*S)*lens;           // lens: anchor eases from the feet to the head (~44% of the view height)
+    const liftPx=airPx*S/(RIG_FIT*LANE_SCALE[0]);
+    gy-=liftPx;
+    return { cx:sx, feetY:gy, S:S, s:S/RIG_FIT, fy:fy, lens:lens, liftPx:liftPx, headY:gy+(SK.head.y-16)*S, bodyY:gy+SK.shoulderMid.y*S*0.6,
+             k:1-Math.min(0.45,liftPx/(D.peteH*sc)) };
+  }
+  function drawShadow(f){ if(f.lens<1){ ctx.fillStyle='rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(f.cx,f.fy,30*f.S*f.k,8*f.S*f.k,0,0,7); ctx.fill(); } }   // contact shadow stays on the floor
+  function drawVignette(){
+    const cy=VT+VH*0.45, vg=ctx.createRadialGradient(VW/2,cy,VH*0.35,VW/2,cy,VH*0.95);   // moody vignette (demo render)
+    vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.55)'); ctx.fillStyle=vg; ctx.fillRect(0,VT,VW,VH);
+  }
+  return { layout, rawScale, depthScale, floorY, proj, peteScreenScale, xLimit, drawHall, drawDoor, drawGoo, drawFx, drawRoach, peteFrame, drawShadow, drawVignette,
+           view:()=>({VK,VPX,VPY,VT,VW,VH}) };
+})();
+let LV=null;   // runtime state of the loaded level (null outside a framework level)
+function l2Reset(){ LV=null; }
+function mobPlace(m){ m.x=m.cx+m.rx*Math.cos(m.a); m.z=m.cz+m.rz*Math.sin(m.a); m.th=Math.atan2(m.rz*Math.cos(m.a)*m.w,-m.rx*Math.sin(m.a)*m.w); }
+function spawnMob(sp,i){
+  const T=MOB_TYPES[sp.type];
+  const m={type:sp.type,id:i,cx:sp.x,cz:sp.z,rx:sp.r,rz:sp.r*0.7,a:i*2.1,w:sp.dir*T.omega,hp:T.hp,state:'alive',t:0,flash:0,freeze:0,leg:i*1.3,th:0,x:sp.x,z:sp.z};
+  mobPlace(m); return m;
+}
+// Health: each point of Pete's CONSTITUTION (the stats sheet's own value) is one point of health. Read live so stat changes carry over.
+function peteMaxHp(def){ const r=(typeof ST_PETE_STATS!=='undefined')?ST_PETE_STATS.find(s=>s[0]==='Constitution'):null; return r?r[1]:def.hp; }
+function loadLevel(def){
+  LV={def, mobs:def.mobs.map(spawnMob), goo:[], fx:[], hp:peteMaxHp(def), hpMax:peteMaxHp(def), spawnBack:true, exit:0, hurtFlash:0, alertF:0, dlg:null, door:{state:'closed',t:0},
+      pressE:false, pressConfirm:false, spaceHeld:false, hint:{shown:false,age:0}, headX:0, headY:0};
+}
+function initLevel2(){
+  const jk=!!(pete&&pete.jacket);                        // an equipped jacket (skill tree) carries into Level 2
+  puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false;
+  initLevel();                                           // fresh pete/camera/input latches, then Level 2 overrides
+  const D=LEVEL_DEFS.level2; loadLevel(D);
+  plats=[]; stair={x:-9999,w:1}; fires=[]; debrisFields=[]; crumbles=[]; item=null; rubble=null; car=null;
+  beat2Shown=true; beat2Timer=0; levelTimer=Infinity; checkpointX=null; box=null; enteringSub=null; timeFall=null; peteGlow=0; startAlert=SA_END;
+  pete.jacket=jk; pete.hx=D.play.spawn.x; pete.hz=D.play.spawn.z; pete.footGoo=0; pete.lastDir='W';   // (lastDir 'W' = back view, the demo's spawn) hall coordinates; pete.x / depth are unused in Level 2
+  pete.depth=0; pete.y=ROAD-pete.h; pete.face='right'; pete.onGround=true;                              // the hall floor is one constant ground for the jump physics
+  camX=0; levelFadeIn=0; HL.layout();
+}
+function l2Frozen(){ return !!(LV && (LV.dlg || LV.door.state==='opening' || LV.exit)); }
+// ---- level end: Pete walks into the open door -> short fade -> the waving CREDITS screen (creditsFrom=2 routes its CONTINUE JOURNEY back to Level 2) ----
+const L2_EXIT_FRAMES=36;
+function l2Finish(){ creditsFrom=2; box=null; cancelAttack(); stopLevel2Music(); setState('CREDITS'); }
+function l2Replay(){ setState('LEVEL2'); initLevel2(); if(keys.Space){ keys.Space=false; LV.spaceHeld=true; } }   // fresh Level 2 (roaches, goo, door, hp, alert, hint, music); the confirm Space never becomes a jump
+// ---- text-box hint: STOMP THE BUGS until every roach is squished (after the FIND YOUR GUIDE alert); a door dialog line temporarily replaces it ----
+function l2HintBox(){
+  if(l2MobsAlive()>0 && !LV.dlg && LV.alertF>=SA_END){
+    if(!box||!box._l2h){ showBox([[{text:'STOMP THE BUGS ',color:'#ffe27a'},{text:TOUCH?'(Hold KICK = X)':'(Hold KICK)',color:'#e8f8f2'}],'Or JUMP onto them.']); box._l2h=1; }
+  } else if(box&&box._l2h) box=null;
+}
+// ---- jump-landing squish: Pete landing from a jump with his feet within L2_LAND_R of a roach (hall units, z weighted like the touch rule) squishes it exactly like the stomp ----
+const L2_LAND_R=80, L2_LAND_ZW=0.8;
+// stuck foot goo: +1 level per kill (capped), fading 1 level per MOB_TYPES.roach.footGooFrames (900 frames = 15 s at 60 fps; a 4-kill stack lasts 60 s)
+const L2_GOO_CAP=4;
+function l2StickGoo(){ pete.footGoo=Math.min(L2_GOO_CAP,(pete.footGoo||0)+1); }
+function l2JumpLand(){
+  const dir=pete.face==='right'?1:-1; let hit=false;
+  for(const m of LV.mobs){
+    if(m.state!=='alive') continue;
+    if(Math.hypot(m.x-pete.hx,(m.z-pete.hz)*L2_LAND_ZW)<=L2_LAND_R){ damageMob(m,m.hp,dir); hit=true; }   // m.hp = lethal: same squash, goo, burst as the stomp kill
+  }
+  if(hit){ playStompSfx(); l2StickGoo(); }
+}
+function l2Locked(){ return state==='LEVEL2' && l2Frozen(); }
+function l2Key(e){
+  if(e.code==='KeyE'&&!e.repeat) LV.pressE=true;
+  if((e.code==='Space'||e.code==='Enter')&&!e.repeat) LV.pressConfirm=true;
+  if(e.code==='Space'){ if((e.repeat&&LV.spaceHeld)||l2Frozen()){ keys.Space=false; LV.spaceHeld=true; } }   // a confirm Space is never a jump
+}
+function l2Click(){ if(LV.dlg) l2Confirm(); }
+function l2ShowLine(){
+  const ln=LV.dlg.lines[LV.dlg.i];
+  showBox([[{text:ln.who+': ',color:ln.who==='PETE'?'#ffe27a':'#9affb0'},{text:ln.text,color:'#e8f8f2'}]]);
+}
+function l2StartDialog(lines,cb){ LV.dlg={lines,i:0,cb:cb||null}; l2ShowLine(); }
+function l2Confirm(){
+  if(!LV||!LV.dlg) return;
+  const d=LV.dlg;
+  if(++d.i>=d.lines.length){ LV.dlg=null; box=null; if(d.cb) d.cb(); } else l2ShowLine();
+}
+// the demo's nearDoor(): close to the RIGHT wall and within the door's z span +/- reachZ
+function l2NearDoor(){ const D=LV.def, dr=D.door; return pete.hx>=D.hall.halfW-D.play.xMargin-dr.reachX && pete.hz>=dr.z0-dr.reachZ && pete.hz<=dr.z1+dr.reachZ; }
+function l2MobsAlive(){ let n=0; for(const m of LV.mobs) if(m.state==='alive') n++; return n; }
+function l2OpenDialog(){
+  const D=LV.def, alive=l2MobsAlive()>0;
+  cancelAttack(); pete.vx=0; pete.walk=0; pete.face='right'; pete.lastDir='D'; pete.walkReleaseAt=null;   // demo: Pete turns to the door (right wall), guard idle
+  l2StartDialog(alive?D.dialogs.knock:D.dialogs.clear, alive?null:()=>{ LV.door.state='opening'; LV.door.t=0; });
+}
+// ---- mobs ----
+function updateMobs(){
+  for(const m of LV.mobs){
+    const T=MOB_TYPES[m.type];
+    if(m.flash>0) m.flash--;
+    if(m.state==='alive'){
+      if(m.freeze>0){ m.freeze--; continue; }              // mob hit-stop
+      m.a+=m.w; mobPlace(m); m.leg+=0.55;                  // demo: circle the spawn point, heading from the tangent, legs scuttle
+    } else if(m.state==='dying'){ if(++m.t>=T.dyingFrames) m.state='dead'; }
+  }
+}
+function damageMob(m,dmg,dir){
+  const T=MOB_TYPES[m.type];
+  m.hp-=dmg; m.flash=6; m.freeze=8; m.cx=Math.max(-360,Math.min(360,m.cx+dir*10)); mobPlace(m);
+  if(T.onHit) T.onHit(m,dmg,dir);
+  if(m.hp<=0){ m.hp=0; m.state='dying'; m.t=0; if(T.onDeath) T.onDeath(m); }   // dying = the demo's 16-frame squash, then goo stays
+}
+// the single hit path: runs once per swing on the move's contact frame (same gate the rubble pile uses). Demo stompLand() generalised
+// to every attack via ATTACK_REACH: the strike point sits d ahead of Pete on the floor, the NEAREST live roach within R is hit.
+function l2ResolveAttack(){
+  const a=pete.attack; if(!a||!a.active||!a.entry||a.mobDone||!attackAtContact()) return;
+  a.mobDone=true;
+  if(a.set!=='kick'||a.index!==2) return;   // only the STOMP (hold kick) hurts roaches; the other attacks play normally but never damage them (the jump-landing squish is l2JumpLand)
+  const R=ATTACK_REACH[a.set+a.index]; if(!R) return;
+  const dir=pete.face==='right'?1:-1, sx=pete.hx+dir*R.d, sz=pete.hz;
+  let best=null, bd=1e9;
+  for(const m of LV.mobs){
+    if(m.state!=='alive') continue;
+    const d=Math.hypot(m.x-sx,(m.z-sz)*ATTACK_ZWEIGHT);
+    if(d<=R.R && d<bd){ bd=d; best=m; }
+  }
+  if(best){ damageMob(best,R.dmg,dir); if(best.state==='dying') l2StickGoo(); }   // a stomp kill splatters Pete's feet (accumulates)
+}
+function l2HurtPete(m,T){                                  // demo hurtPete(): 1 of 5 hp, 90 frames of blink, small red flash
+  pete.hurt=LV.def.invul; LV.hurtFlash=8; LV.hp-=T.dmg;
+  playHitSfx();   // "UMPH!" (same injury path as Level 1's debris collision)
+  if(LV.hp<=0){ LV.hp=LV.hpMax; pete.hx=LV.def.play.spawn.x; pete.hz=LV.def.play.spawn.z; pete.hurt=120; LV.hurtFlash=30; cancelAttack(); }   // demo: refill, back to the hall start (roaches and goo stay)
+}
+// ---- goo + particles (demo addGoo / burst / goo+fx update) ----
+function l2AddGoo(x,z){
+  const rad=[]; for(let i=0;i<12;i++) rad.push(34+((i*37+11)%23)*1.1+(i%3)*5);
+  const drops=[]; for(let i=0;i<6;i++) drops.push({a:i*1.05+0.3,d:62+((i*29)%31),r:4+(i%3)*2});
+  LV.goo.push({x,z,rad,drops,age:0});
+}
+function l2Burst(x,z,kind,n){
+  const goo=kind==='goo';
+  for(let i=0;i<n;i++){ const a=i*0.35+(i%3), sp=goo?2+(i*7%5):1.2+(i*7%5)*0.3;
+    LV.fx.push({X:x,Y:8,z,vx:Math.cos(a)*sp,vy:goo?5+(i%4)*2.2:2+(i%4)*1.4,vz:Math.sin(a)*sp*0.7,life:goo?50:26,kind}); }
+}
+function l2UpdateGooFx(){
+  for(const g of LV.goo) g.age++;
+  for(let i=LV.fx.length-1;i>=0;i--){ const p=LV.fx[i]; p.X+=p.vx; p.z+=p.vz; p.Y+=p.vy; p.vy-=0.7;
+    if(p.Y<=0){ p.Y=0; p.vy=0; p.vx*=0.6; p.vz*=0.6; } if(--p.life<=0) LV.fx.splice(i,1); }
+}
+function l2Timers(){                                       // per-frame timers (demo update): blink, red flash, foot goo fade
+  if(pete.hurt>0) pete.hurt--; if(LV.hurtFlash>0) LV.hurtFlash--;
+  if(pete.footGoo>0) pete.footGoo=Math.max(0,pete.footGoo-1/MOB_TYPES.roach.footGooFrames);
+}
+// ---- Level 2 per-frame update. updatePlatformer hands over to updateHall() in LEVEL2 (the hall has its own space; Pete's
+// input resolution, attacks, jump and hit-stop are the same shared calls Level 1 uses). ----
+function hallJump(){
+  if(keys['Space']&&pete.onGround){ pete.vy=-JUMP; pete.onGround=false; }                       // Space only (Up/Down are hall depth)
+  const wasGrounded=pete.onGround;                                                              // captured BEFORE clearing (S-walk flicker fix, hall form)
+  pete.vy+=GRAV; pete.y+=pete.vy; pete.onGround=false;
+  const gY=ROAD;                                                                                // the hall floor is one constant ground
+  if(pete.vy>=0 && (wasGrounded || footY(pete)>=gY)){ pete.y=gY-pete.h; pete.vy=0; pete.onGround=true; if(!wasGrounded && LV && !LV.exit) l2JumpLand(); }   // landing from a jump: squish roaches under his feet
+}
+function l2UpdateFrozen(){                                 // dialog / door opening: Pete is held (guard idle), roaches keep circling
+  const D=LV.def; LV.alertF++; updateMobs(); l2UpdateGooFx(); l2Timers(); hallJump();
+  if(LV.exit && ++LV.exit>=L2_EXIT_FRAMES){ l2Finish(); return; }
+  const pr=LV.pressE||LV.pressConfirm;
+  if(LV.dlg){ if(pr) l2Confirm(); }
+  if(LV.door.state==='opening'){ LV.door.t+=1/D.door.openFrames; if(LV.door.t>=1){ LV.door.t=1; LV.door.state='open'; } }
+  LV.pressE=false; LV.pressConfirm=false;
+}
+function updateHall(){
+  perf2=(typeof performance!=='undefined')?performance.now():(perf2+16);
+  HL.layout(); pickupPrompt=false;
+  if(l2Frozen()){ l2UpdateFrozen(); return; }
+  const D=LV.def, P=D.play;
+  if(peteGlow>0) peteGlow--;
+  promoteHolds(); tickAttack(); attackSfx();               // R/F tap/double/hold -> attacks (shared with Level 1)
+  // ---- demo movement (update L2833-2851): Up/W = farther (z up, up the screen), Down/S = toward the camera, Left/Right = across (X) ----
+  const kL=kHeldL(), kR=kHeldR(), kU=kHeldU(), kD=kHeldD();
+  if(LV.spawnBack && (kL||kR||kU||kD||keys['Space']||pete.attack.active)) LV.spawnBack=false;   // the back-view spawn pose ends on the first input
+  const attackLock=pete.attack.active&&pete.onGround;      // no walking while a grounded attack plays (demo: !M.active)
+  if(!attackLock){
+    if(kL) pete.face='left'; if(kR) pete.face='right';
+    const dx=(kR?1:0)-(kL?1:0), dz=(kU?1:0)-(kD?1:0), cam=D.camera;
+    pete.hz=Math.max(P.zMin,Math.min(P.zMax,pete.hz+dz*P.moveZ*(pete.hz<cam.nearZ?Math.pow(pete.hz/cam.nearZ,1.5):1)));   // close-up: slow z steps so screen speed stays even
+    let xl=HL.xLimit(pete.hz);
+    if(LV.door.state==='open' && pete.hz>=D.door.z0+30 && pete.hz<=D.door.z1-30) xl=Math.max(xl,D.hall.halfW-12);   // open door: the wall is passable there, Pete can step into the doorway
+    pete.hx=Math.max(-xl,Math.min(xl,pete.hx+dx*P.moveX*Math.min(1,1/HL.rawScale(pete.hz))));
+    pete.vx=dx!==0?dx*MOVE*0.9:0;                          // petePose reads |vx|/MOVE for the side-walk stride: the demo's WALK_SPD 0.9
+  } else pete.vx=0;
+  if(kR||kL) pete.walk+=Math.max(0.14,Math.abs(pete.vx)*0.12); else if(kU||kD) pete.walk+=0.14; else pete.walk=0;   // same stride rule as Level 1
+  hallJump();
+  l2Update();
+}
+function l2Update(){
+  const D=LV.def;
+  LV.alertF++; updateMobs(); l2UpdateGooFx(); l2Timers(); l2ResolveAttack();
+  if(pete.hurt<=0){                                        // roach touch (demo): floor distance < hitR, jumping over is safe
+    const air=ROAD-footY(pete);
+    for(const m of LV.mobs){ if(m.state!=='alive') continue; const T=MOB_TYPES[m.type].touch;
+      if(air<T.airLab/(peteModelH()*LAB_SCALE)*pete.h*LANE_SCALE[0] && (pete.onGround||pete.vy<=0) && Math.hypot(m.x-pete.hx,(m.z-pete.hz)*T.zW)<T.hitR){ l2HurtPete(m,T); break; } }
+  }
+  if(LV.door.state==='open' && !LV.exit && pete.hx>=D.hall.halfW-34 && pete.hz>=D.door.z0+30 && pete.hz<=D.door.z1-30){ LV.exit=1; cancelAttack(); pete.vx=0; pete.walk=0; pete.face='right'; }   // walked into the open doorway: end of Level 2
+  l2HintBox();
+  if(LV.door.state==='closed' && l2NearDoor()){ pickupPrompt=true; if(LV.pressE) l2OpenDialog(); }   // Y on touch lights up through pickupPrompt
+  if(!LV.hint.shown){ for(const m of LV.mobs){ if(m.state==='alive' && Math.hypot(m.x-pete.hx,m.z-pete.hz)<=D.hint.dist){ LV.hint.shown=true; break; } } }
+  else LV.hint.age++;
+  LV.pressE=false; LV.pressConfirm=false;
+}
+// ---- drawing: the hall itself lives in HL (above). drawLevel2 composes it with the shared Pete draw. ----
+function drawMob(m){ MOB_TYPES[m.type].draw(m); }
+// over-head speech bubble (demo drawBubble: dark panel, #16c79a border, tail to the head, two lines), once per level run
+function l2DrawBubble(){
+  const hf=LV.def.hint.frames, age=LV.hint.age;
+  if(!LV.hint.shown || age>=hf || LV.dlg) return;
+  const fade=age>hf-40?(hf-age)/40:Math.min(1,age/8+0.2), t1='Stomp the Roaches!', t2='hold '+(TOUCH?'X':'F');
+  ctx.save(); ctx.globalAlpha=fade; ctx.font='bold 17px Trebuchet MS';
+  const w=ctx.measureText(t1).width+30, h=50, margin=8, hx=LV.headX, hy=LV.headY;
+  const bx=clamp(hx,margin+w/2,W-margin-w/2), by=Math.max(VIEW_TOP+margin+h,hy-22), x=bx-w/2, y=by-h;
+  const tipX=hx, tipY=hy-2, baseX=clamp(tipX,x+14,x+w-14);
+  ctx.fillStyle='rgba(8,8,16,.92)'; rr(x,y,w,h,10); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(baseX-8,y+h-1); ctx.lineTo(baseX+8,y+h-1); ctx.lineTo(tipX,tipY); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle='#16c79a'; ctx.lineWidth=2.5; rr(x,y,w,h,10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(baseX-8,y+h-1); ctx.lineTo(tipX,tipY); ctx.lineTo(baseX+8,y+h-1); ctx.stroke();
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillStyle='#e8f8f2'; ctx.fillText(t1,bx,y+17);
+  ctx.font='bold 15px Trebuchet MS'; ctx.fillStyle='#ffd36a'; ctx.fillText(t2,bx,y+36);
+  ctx.restore();
+}
+function drawLevel2(){
+  HL.layout();
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,PLAYFIELD_BOTTOM); ctx.clip();
+  HL.drawHall(); HL.drawDoor(LV.door); HL.drawGoo(LV.goo);   // demo render(): hall, door, goo piles (flat on the floor), then the depth-sorted pass
+  resetFront();                                            // big foot / big hand are flushed after the sorted pass (frontmost)
+  const zl=[{z:pete.hz,f:drawPeteSorted}];                 // Pete + live/dying roaches, far (big z) first, exactly the demo's sort
+  for(const m of LV.mobs) if(m.state!=='dead') zl.push({z:m.z,f:()=>drawMob(m)});
+  zl.sort((a,b)=>b.z-a.z); for(const it of zl) it.f();
+  HL.drawFx(LV.fx);                                        // goo droplets / dust on top of everything in the sorted pass
+  flushFront();
+  HL.drawVignette();
+  if(LV.hurtFlash>0){ ctx.fillStyle='rgba(226,58,58,'+(0.015*LV.hurtFlash)+')'; ctx.fillRect(0,VIEW_TOP,W,PLAYFIELD_BOTTOM-VIEW_TOP); }
+  if(LV.exit>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,LV.exit/L2_EXIT_FRAMES)+')'; ctx.fillRect(0,VIEW_TOP,W,PLAYFIELD_BOTTOM-VIEW_TOP); }   // fade out into the end screen
+  if(!LV.dlg){
+    l2DrawBubble();
+    if(LV.door.state==='closed' && l2NearDoor()){          // demo interaction prompt over Pete's head
+      const txt=(TOUCH?'Y':'E')+'   talk to door', y=Math.max(VIEW_TOP+30,LV.headY-8);
+      ctx.font='bold 15px Trebuchet MS'; const tw=ctx.measureText(txt).width+22;
+      ctx.fillStyle='rgba(0,0,0,.78)'; ctx.fillRect(LV.headX-tw/2,y-16,tw,26);
+      ctx.strokeStyle='#e8c070'; ctx.lineWidth=1.5; ctx.strokeRect(LV.headX-tw/2,y-16,tw,26);
+      ctx.fillStyle='#ffe9a8'; ctx.textAlign='center'; ctx.textBaseline='alphabetic'; ctx.fillText(txt,LV.headX,y+2); ctx.textAlign='left';
+    }
+  }
+  ctx.restore();
+}
+// ---- HUD (drawn in the translate(0,VIEW_TOP) layer) ----
+function l2ChipRect(){ const c=LV.def.alert.chip; return {x:W-c.gap-c.w,y:c.y,w:c.w,h:c.h}; }
+function drawL2Alert(){   // same green HUD alert as Level 1's drawStartAlert (same SA_* timing/easing), message FIND YOUR GUIDE, minimizing into a corner chip
+  const MSG=LV.def.alert.msg, f=LV.alertF, tr=l2ChipRect(), Hh=PLAYFIELD_BOTTOM-VIEW_TOP;
+  if(f>=SA_END){ if(LV.door.state==='closed'){ hudPanel(tr.x,tr.y,tr.w,tr.h,1,false,false); hudText(MSG,tr.x+tr.w/2,tr.y+tr.h/2+1,20,1,false); } return; }
+  let vis=1; if(f<SA_BLINK_AT+3*SA_BLINK_LEN && f>=SA_BLINK_AT) vis=((f-SA_BLINK_AT)%SA_BLINK_LEN<SA_BLINK_LEN/2)?0:1;   // 3 blinks: off then on, x3
+  const pop=Math.min(1,f/SA_POP);
+  const mp=f<SA_MIN_AT?0:Math.min(1,(f-SA_MIN_AT)/(SA_END-SA_MIN_AT)), me=mp<.5?2*mp*mp:1-Math.pow(-2*mp+2,2)/2;
+  const full={x:0,y:Hh*0.5-Math.min(70,Hh*0.2),w:W,h:Math.min(140,Hh*0.4)};
+  const R={x:full.x+(tr.x-full.x)*me, y:full.y+(tr.y-full.y)*me, w:full.w+(tr.w-full.w)*me, h:full.h+(tr.h-full.h)*me};
+  ctx.save();
+  if(vis){
+    ctx.globalAlpha=pop;
+    ctx.fillStyle='rgba(2,22,9,'+(0.38*(1-me))+')'; ctx.fillRect(0,0,W,Hh);                       // whole-screen HUD wash (fades as it minimizes)
+    ctx.fillStyle='rgba(93,255,138,'+(0.05*(1-me))+')'; for(let sy=1;sy<Hh;sy+=4) ctx.fillRect(0,sy,W,1);
+    hudPanel(R.x,R.y,R.w,R.h,1,false,false);
+    const msz=Math.min(34,(W-56)/(MSG.length*0.6)), ma=1-Math.min(1,mp*2.2), ta=Math.max(0,Math.min(1,(mp-0.45)*2)), k=R.w/W;
+    if(ma>0){ ctx.save(); ctx.beginPath(); ctx.rect(R.x,R.y,R.w,R.h); ctx.clip(); hudText(MSG,R.x+R.w/2,R.y+R.h/2,msz*Math.max(0.2,k),ma,false,Math.max(10,R.w-24)); ctx.restore(); }
+    if(ta>0) hudText(MSG,R.x+R.w/2,R.y+R.h/2+1,20,ta,false);
+  }
+  ctx.restore();
+}
+function l2DrawHud(){   // segmented health bar, top-left: ONE thin segment per health point (= Pete's Constitution), 1px lines, green HUD style
+  const n=LV.hpMax, x=14, y=14, sw=14, sh=8, gap=2, pad=3, bx=x+22, bw=n*(sw+gap)-gap, hot=LV.hurtFlash>0;
+  ctx.save(); ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+  ctx.font='bold 11px Trebuchet MS'; ctx.fillStyle=hot?'#ff9a9a':'#5dff8a'; ctx.fillText('HP',x,y+sh);
+  ctx.fillStyle='rgba(2,22,9,.78)'; ctx.fillRect(bx-pad,y-pad,bw+pad*2,sh+pad*2);
+  ctx.strokeStyle=hot?'rgba(255,120,120,.9)':'rgba(93,255,138,.65)'; ctx.lineWidth=1; ctx.strokeRect(bx-pad+.5,y-pad+.5,bw+pad*2-1,sh+pad*2-1);
+  for(let i=0;i<n;i++){ const sx=bx+i*(sw+gap), on=i<LV.hp;
+    ctx.fillStyle=on?(hot?'#ff6a6a':'#3ee08a'):'#143022'; ctx.fillRect(sx,y,sw,sh);
+    if(on){ ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(sx,y,sw,2); } }
+  ctx.restore();
+}
 function drawTimeFall(){
   const p=Math.min(1,timeFall.t/TIMEFALL_LEN), e=p*p, cx=W/2, cy=PLAYFIELD_BOTTOM/2;
   ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,PLAYFIELD_BOTTOM); ctx.clip();
@@ -4905,6 +5605,7 @@ function nearRubble(){
     Math.abs(pete.depth-rubble.depth)<0.9;   // very generous depth — hit from near or far lane
 }
 function updatePlatformer(){
+  if(state==='LEVEL2'){ updateHall(); return; }   // Level 2: the hall has its own space (hall coordinates, demo movement); Pete's attacks/jump/pose are the shared calls
   // LEVEL COUNTDOWN / TIME-OUT FALL: gameplay is frozen while the fall plays; then the level restarts.
   if(timeFall){ peteGlow=0; if(++timeFall.t>=TIMEFALL_LEN+20) restartLevelAfterTimeout(); return; }
   if(peteGlow>0) peteGlow--;
@@ -5590,21 +6291,27 @@ function drawDebrisChunk(d){
 }
 function drawPeteSorted(){
   if(timeFall) return;   // time-out fall: Pete is drawn tumbling by drawTimeFall instead
+  // Level 2 (hall): Pete is placed through the demo's projection (HL.peteFrame: x across, z depth -> screen x / feet y / scale, lens zoom, jump lift).
+  // HF stays null in Level 1, so every Level 1 draw below is byte-for-byte the same path as 6.0.
+  const hall=(state==='LEVEL2'&&LV);
+  let HF=null;
+  if(hall){ HF=HL.peteFrame(LV.pose||poseIdleDir('D',0),pete.hx,pete.hz,Math.max(0,ROAD-footY(pete))); LV.headX=HF.cx; LV.headY=HF.headY; HL.drawShadow(HF); }
+  const rk=HF?HF.S/(RIG_FIT*LANE_SCALE[0]):1;   // size of Pete's hurt effects relative to Level 1's near lane
   const hurting = pete.hurt>0;
   const showPete = !hurting || (Math.floor(t/4)%2===0);   // blink on/off
   if(showPete){
     if(hurting){ // TONED-DOWN shock: just a couple of short, faint electric flicks off the body —
       // the BLINK (showPete toggle) + the reddish damage flash carry the hit; the bolts are now a
       // minimal accent, not a show. Fewer (2), shorter (7..15px), thinner, dimmer than before.
-      const kx=pete.x+pete.w/2, kyc=footY(pete)-42;   // body center-ish
+      const kx=HF?HF.cx:pete.x+pete.w/2, kyc=HF?HF.bodyY:footY(pete)-42;   // body center-ish
       ctx.save();
       ctx.globalCompositeOperation='lighter';
       ctx.lineCap='round';
-      const bolts=2, bodyR=16;
+      const bolts=2, bodyR=16*rk;
       for(let z=0;z<bolts;z++){
         // anchor at the body edge, fire outward at an angle that drifts + flickers
         const a = z*(6.283/bolts) + t*0.18 + Math.sin(t*0.5+z)*0.3;
-        const len = 7 + ((Math.sin(t*0.9+z*2)+1)*0.5)*8;       // 7..15 px (was 14..28), flickering
+        const len = (7 + ((Math.sin(t*0.9+z*2)+1)*0.5)*8)*rk;   // 7..15 px (was 14..28), flickering
         // bolt start on the body silhouette, end out in space
         let bx = kx+Math.cos(a)*bodyR, by = kyc+Math.sin(a)*bodyR*1.3;
         const ex = kx+Math.cos(a)*(bodyR+len), ey = kyc+Math.sin(a)*(bodyR+len)*1.3;
@@ -5626,7 +6333,7 @@ function drawPeteSorted(){
     }
     ctx.save(); if(hurting) ctx.globalAlpha=0.85;
     // scale by continuous depth for 3D feel (far = a touch smaller)
-    const pScale = LANE_SCALE[0] + (LANE_SCALE[1]-LANE_SCALE[0])*pete.depth;
+    let pScale = LANE_SCALE[0] + (LANE_SCALE[1]-LANE_SCALE[0])*pete.depth;
     // normal arms (no cradle); cat rides on his shoulder like a parrot.
     // airborne -> jump pose (o.air = upward velocity; game vy is negative going up).
     // IMPORTANT: only treat as airborne during a REAL jump (meaningful vertical velocity). While
@@ -5634,9 +6341,13 @@ function drawPeteSorted(){
     // the changing depth), which was spuriously setting o.air → poseJumpAir() for one frame → an
     // arm flew overhead = the S-walk "wave" flicker. Gating on |vy| ignores those 1-frame blips.
     const pOpts={face:pete.face,walk:pete.walk,jacket:pete.jacket,cat:true,deferFront:true};   // big foot/hand are flushed by drawPlatformer (frontmost)
+    if(hall) pOpts.footGoo=pete.footGoo;                                            // Level 2: green stomp splatter on the far foot (drawPete)
+    if(state==='LEVEL2'&&LV&&(LV.dlg||LV.door.state==='opening'||LV.exit)) pOpts.guard=true;   // talking to the door / walking in: guard idle (existing o.guard override)
+    else if(hall&&LV.spawnBack) pOpts.back=true;                                    // Level 2 spawn: back view, close-up behind the head
     const trulyAirborne = !pete.onGround && Math.abs(pete.vy) > 1.5;   // real jump/fall, not depth jitter
     if(trulyAirborne) pOpts.air = -pete.vy;
-    const _gk=pete.x+pete.w/2, _gy=footY(pete)-42*pScale;   // body center for the pickup glow
+    if(hall){ LV.pose=petePose(pOpts); HF=HL.peteFrame(LV.pose,pete.hx,pete.hz,Math.max(0,ROAD-footY(pete))); LV.headX=HF.cx; LV.headY=HF.headY; pScale=HF.s; }   // the real pose (lens zoom needs its head height)
+    const _gk=HF?HF.cx:pete.x+pete.w/2, _gy=(HF?HF.feetY:footY(pete))-42*pScale;   // body center for the pickup glow
     if(peteGlow>0 && !enteringSub) drawPeteGlow(_gk,_gy,pScale,true);   // halo behind Pete
     if(enteringSub && stairSteps.length){
       // SUBWAY ENTRY: Pete WALKS DOWN the visible NYC side-stairs, placed ON each tread, stepping
@@ -5655,20 +6366,20 @@ function drawPeteSorted(){
       pOpts.walk=(perf2*0.014); pOpts.face='right'; pOpts.deferFront=false;              // stepping down toward the station
       drawPete(sx, sy, dScale, pOpts);                           // feet on the tread
     } else {
-      drawPete(pete.x+pete.w/2,footY(pete),pScale,pOpts);
+      drawPete(HF?HF.cx:pete.x+pete.w/2,HF?HF.feetY:footY(pete),pScale,pOpts);
     }
     if(peteGlow>0 && !enteringSub) drawPeteGlow(_gk,_gy,pScale,false);   // bright tint + sparkles over Pete
     // reddish DAMAGE FLASH over the body on hurt frames (the "blinks reddish" cue). A soft,
     // pulsing red glow localized to the body — kept subtle so it reads as a flinch, not a splat.
     if(hurting){
-      const kx=pete.x+pete.w/2, kyc=footY(pete)-42;
+      const kx=HF?HF.cx:pete.x+pete.w/2, kyc=HF?HF.bodyY:footY(pete)-42;
       ctx.save();
       const rp=0.22+0.16*Math.sin(t*1.1);
-      const rg=ctx.createRadialGradient(kx,kyc,4,kx,kyc,34);
+      const rg=ctx.createRadialGradient(kx,kyc,4*rk,kx,kyc,34*rk);
       rg.addColorStop(0,'rgba(226,58,58,'+rp+')');
       rg.addColorStop(1,'rgba(226,58,58,0)');
       ctx.fillStyle=rg;
-      ctx.beginPath();ctx.ellipse(kx,kyc,28,40,0,0,7);ctx.fill();
+      ctx.beginPath();ctx.ellipse(kx,kyc,28*rk,40*rk,0,0,7);ctx.fill();
       ctx.restore();
     }
     // WARM FIRE TINT: soft additive flickering glow cast on Pete when near a same-lane-ish fire.
@@ -6436,7 +7147,7 @@ function updateDescent(){
   const go = kHeldD()||kHeldR()||keys['Space']||kHeldL();
   if(go){ descProg=Math.min(TOTAL_STEPS, descProg+STEP_SPEED); descHold++; }
   else descHold=0;
-  if(descProg>=TOTAL_STEPS) setState('CREDITS');
+  if(descProg>=TOTAL_STEPS){ creditsFrom=1; setState('CREDITS'); }
 }
 // ===== Monument-Valley style walkable switchback staircase =====
 // Iso projection: world (wx = left/right along a flight, wy = depth INTO the scene,
@@ -6644,7 +7355,7 @@ const ST_BISCUIT_STATS=[['Strength',1],['Intelligence',1],['Constitution',1],['D
 const ST_PETE_SKILLS=[{name:null,key:null},{name:null,key:null},{name:null,key:null}];
 const ST_BISCUIT_SKILLS=[{name:null,key:null},{name:null,key:null},{name:null,key:null}];
 // WHERE "CONTINUE" GOES: placeholder until the next level exists. Change this to the next state.
-const ST_NEXT_STATE='CREDITS';
+const ST_NEXT_STATE='LEVEL2';   // 7.0: CONTINUE on the stats screen enters Level 2 (was 'CREDITS')
 // CAPACITY TABLE (max items a slot can hold): neck 5; each hand 5 (one ring per finger); each foot 5
 // (one per toe); every other body area/joint (head, chest, waist, shoulders, elbow, wrist, knee, legs, ankles) 1.
 const ST_CAP={neck:5,hand:5,foot:5,single:1};
@@ -6931,7 +7642,7 @@ function drawSkillTree(){
   ctx.textAlign='left';rule(236);
   ctx.fillStyle=ST_GM;ctx.font='bold 10px '+mono;ctx.fillText('VITALS',20,254);
   ctx.font='bold 12px '+mono;ctx.fillStyle=ST_G;ctx.fillText('Hit Points',20,274);ctx.fillText('Mana',20,292);ctx.font='12px '+mono;
-  ctx.textAlign='right';ctx.fillStyle=ST_GM;ctx.fillText('TBD',160,274);ctx.fillText('TBD',160,292);ctx.textAlign='left';
+  ctx.textAlign='right';ctx.fillStyle=ST_GM;ctx.fillText(String(peteMaxHp({hp:5})),160,274);ctx.fillText('TBD',160,292);   // Hit Points = Constitution (1:1); Mana still TBDctx.textAlign='left';
   rule(306);
   ctx.fillStyle=ST_GM;ctx.font='bold 10px '+mono;ctx.fillText('TOP 3 SKILLS',20,324);
   ST_PETE_SKILLS.forEach((sk,i)=>stSkillBox(18,334+i*50,142,44,sk,i,true));
@@ -6973,7 +7684,7 @@ function drawSkillTree(){
   { const sy=(t*1.4)%(H+120)-60;const g=ctx.createLinearGradient(0,sy-40,0,sy+40);g.addColorStop(0,'rgba(93,255,138,0)');g.addColorStop(0.5,'rgba(93,255,138,0.05)');g.addColorStop(1,'rgba(93,255,138,0)');ctx.fillStyle=g;ctx.fillRect(0,sy-40,W,80); }
 }
 // leave the skill tree (placeholder destination: ST_NEXT_STATE) - never restarts the game
-function skillTreeAdvance(){ setState(ST_NEXT_STATE); }
+function skillTreeAdvance(){ setState(ST_NEXT_STATE); if(state==='LEVEL2'){ initLevel2(); if(keys.Space){ keys.Space=false; LV.spaceHeld=true; } } }   // the CONTINUE Space press must not become a jump
 function skillTreeClick(mx,my){
   for(let i=stRects.length-1;i>=0;i--){ const r=stRects[i];     // last drawn (popup) wins
     if(mx>=r.x&&mx<=r.x+r.w&&my>=r.y&&my<=r.y+r.h){
@@ -6999,20 +7710,26 @@ function onClick(e){
     } else advanceCut();
   }
   else if(state==='CREDITS'){   // only the CONTINUE JOURNEY button does anything (no accidental restart)
-    const b=replayBtn; if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h) setState('SKILLTREE');
+    const b=replayBtn; if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){ creditsContinue(); return; }
     const rs=restartBtn; if(mx>=rs.x&&mx<=rs.x+rs.w&&my>=rs.y&&my<=rs.y+rs.h) restartGame();
   }
   else if(state==='SKILLTREE') skillTreeClick(mx,my);
+  else if(state==='LEVEL2'&&LV) l2Click();
 }
 // replay button rect on the end screen (also drawn in drawCredits)
 const replayBtn={x:W/2-125,y:369,w:250,h:34};
 // RESTART button, top-left of the end screen (the mute icon is top-right). Back to a fresh TITLE without reloading the page.
 const restartBtn={x:14,y:12,w:150,h:34};
+// Which level just ended, to route CONTINUE JOURNEY: 1 = Level 1 (-> SKILLTREE stats screen -> Level 2), 2 = Level 2 (-> Level 2 again, fully reset).
+let creditsFrom=1;
+function creditsContinue(){ if(creditsFrom===2) l2Replay(); else setState('SKILLTREE'); }
 function restartGame(){
   box=null; choice=null; puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false; enteringSub=null; timeFall=null; levelFadeIn=0; stopInjurySfx(); _holeFall=false;
   startAlert=0; _tickSec=999; levelTimer=LEVEL_TIME_FRAMES; checkpointX=null; beat2Shown=false; descProg=0; descHold=0; stWorn.boxers=true; stOpen=null; stFig=null;
   cutPhase='intro'; cut=0; introStep=0; yellCount=0; choiceRects=[];
   for(const k in keys) keys[k]=false; releaseAtkKeys();
+  creditsFrom=1;
+  l2Reset();              // Level 2: drop mobs, goo, door/dialog/end state; the next entry rebuilds everything
   initLevel();            // fresh pete (jacket:false), plats, traps, pickups, timer
   setState('TITLE');      // stops every music engine (setState owns music), clears the glow, t=0
 }
@@ -7134,7 +7851,7 @@ if(TOUCH){
   function applyView(){
     const cs=getComputedStyle(wrapEl), pl=parseFloat(cs.paddingLeft)||0, pt=parseFloat(cs.paddingTop)||0;
     const cw=Math.max(1,VV.w-pl-(parseFloat(cs.paddingRight)||0)), ch=Math.max(1,VV.h-pt-(parseFloat(cs.paddingBottom)||0));
-    const wide=(state==='PLATFORMER')&&!mobPaused, a=cw/ch;
+    const wide=inPlay()&&!mobPaused, a=cw/ch;
     const intro=(state==='TITLE'||state==='CUTSCENE')&&!mobPaused;   // touch-only intro zoom (this whole layer is inert on desktop)
     let nw=W_BASE, R=H;
     if(wide){ R=Math.max(H-CROP_TOP,Math.min(H,W_BASE/a)); nw=Math.min(WMAX,Math.max(W_BASE,Math.round(a*R))); }
@@ -7188,7 +7905,7 @@ if(TOUCH){
   // the side gutter beside the picture is wide enough to hold them (otherwise taps on the picture still work as before).
   function ctlClass(){
     if(mobPaused) return '';
-    if(state==='PLATFORMER') return 'show';
+    if(inPlay()) return 'show';
     if(state==='DESCENT') return 'show m-desc';
     if(state==='TITLE'||state==='CUTSCENE'||state==='CREDITS'||state==='SKILLTREE'){
       if(state==='CUTSCENE'&&choice) return 'show m-choice';   // dialogue options: D-pad (move) + A (confirm) always, over the picture; the panel is inset beside them (applyView)
@@ -7206,7 +7923,7 @@ if(TOUCH){
       aLbl.textContent=tc.classList.contains('m-choice')?'CONFIRM':'JUMP';   // A confirms the highlighted dialogue option
     }
     if(tc.classList.contains('show')){   // Y (pick up) lights up when Pete is in range of an item (same flag that drives the on-screen prompt)
-      const hi=(state==='PLATFORMER')&&!!pickupPrompt;
+      const hi=inPlay()&&!!pickupPrompt;
       if(hi!==curHi){ curHi=hi; bUse.el.classList.toggle('hi',hi); }
     }
   };
@@ -7260,12 +7977,15 @@ function loop(now){
   // moment lands (~5s total: the earlier comedic beat + ~3s more before Pete & Biscuit appear on
   // the pile at cut 5). COLLAPSE_DONE(230) + 300 frames ≈ 5s of settled collapse before advancing.
   if(state==='CUTSCENE' && cutPhase==='fetch' && cut===4 && t>=COLLAPSE_DONE+300){ advanceCut(); }
-  if(state==='PLATFORMER')updatePlatformer();
+  if(inPlay())updatePlatformer();
   if(state==='DESCENT')updateDescent();
   if(state==='TITLE')drawTitle();else if(state==='CUTSCENE')drawCutscene();
   else if(state==='PLATFORMER'){ if(timeFall)drawTimeFall(); else drawPlatformer();
     if(levelFadeIn>0){ ctx.fillStyle='rgba(0,0,0,'+(levelFadeIn/LEVEL_FADE_FRAMES)+')'; ctx.fillRect(0,0,W,PLAYFIELD_BOTTOM); levelFadeIn--; }
     ctx.save(); ctx.translate(0,VIEW_TOP); drawLevelTimer(); drawStartAlert(); ctx.restore(); }   // HUD rides the top of the (possibly cropped) view
+  else if(state==='LEVEL2'&&LV){ drawLevel2();
+    if(levelFadeIn>0){ ctx.fillStyle='rgba(0,0,0,'+(levelFadeIn/LEVEL_FADE_FRAMES)+')'; ctx.fillRect(0,0,W,PLAYFIELD_BOTTOM); levelFadeIn--; }
+    ctx.save(); ctx.translate(0,VIEW_TOP); drawL2Alert(); l2DrawHud(); ctx.restore(); }
   else if(state==='DESCENT')drawDescent();else if(state==='CREDITS')drawCredits();
   else if(state==='SKILLTREE')drawSkillTree();
   if(muteShown()){ ctx.save(); ctx.translate(0,VIEW_TOP); drawMuteBtn(); ctx.restore(); }   // mute speaker whenever music plays
