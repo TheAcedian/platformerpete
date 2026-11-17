@@ -301,7 +301,7 @@ function stopAllMusic(){ stopMusic(); stopDescentMusic(); stopLevel2Music(); }
 // loop body bars 1-6 = A (4 bars) : B (2 bars). Own Tone.Loop; shares the Transport (states never overlap).
 // =====================================================================
 let _m2On=false, _m2Built=false, _m2Nodes={}, _m2Seq=null, _m2Step=0, _m2IntroPlayed=false;
-const _M2_TEMPO=146, _M2_TOTAL=112, _M2_LOOP_START=16, _M2_VOL=0.26 /* 0.39 x 2/3 = about -3.5 dB more: Michael asked for 1/3 less (was 0.78 x 0.5 = 0.39; this track only) */, _M2_GRIT=0.58, _M2_DARK=0.70, _M2_LEAD=0.85;
+const _M2_TEMPO=146, _M2_TOTAL=112, _M2_LOOP_START=16, _M2_VOL=0.13 /* halved again (was 0.26, Michael: still too loud); 0.39 x 2/3 = about -3.5 dB more: Michael asked for 1/3 less (was 0.78 x 0.5 = 0.39; this track only) */, _M2_GRIT=0.58, _M2_DARK=0.70, _M2_LEAD=0.85;
 function initLevel2Music(){
   if(_m2Built || typeof Tone==='undefined') return;
   try{
@@ -595,8 +595,8 @@ function collapseBoom(){                      // the big final impact as the bui
 // Fired from updatePlatformer at the move's contact frame (ATTACK_HIT_TT), once per attack. Muted = no nodes made.
 // =====================================================================
 let _fxN=null;
-const _FX_CAP={jab:4, stomp:2, tick:2, fall:2, fire:2, hit:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[], tick:[], fall:[], fire:[], hit:[]};
-let _fxCalls={jab:0, stomp:0, tick:0, fall:0, fire:0, hit:0};          // debug counters (incremented only when a sound is actually built)
+const _FX_CAP={jab:4, stomp:2, tick:2, fall:2, fire:2, hit:2, engine:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[], tick:[], fall:[], fire:[], hit:[], engine:[]};
+let _fxCalls={jab:0, stomp:0, tick:0, fall:0, fire:0, hit:0, engine:0};          // debug counters (incremented only when a sound is actually built)
 function _fxInit(){
   if(_fxN) return _fxN;
   const AC=Tone.context.rawContext;
@@ -670,6 +670,24 @@ function playJabSfx(){
       qf.frequency.exponentialRampToValueAtTime(q0*0.8,st+D*0.5); qf.frequency.exponentialRampToValueAtTime(120,st+D*0.95);
       env(qg,st,wet*0.4*p*v,Math.max(0.05,D*0.95)); qs.connect(qf); qf.connect(qg); qg.connect(master); }
     _fxLive.jab.push({at:ctx.currentTime, end:t+0.5}); _fxCalls.jab++;
+  }catch(e){}
+}
+// MURDER TRACTOR engine (Level 2 final charge): 'rev' = a ragged rising rumble while it shakes, 'go' = the flat-out roar as it launches. Original, synthesized, muted = no nodes.
+function playEngineSfx(kind){
+  const N=_fxGate('engine'); if(!N) return;
+  try{
+    const ctx=N.AC, m=N.vox, t=ctx.currentTime+0.01, go=kind==='go', D=go?1.5:1.7;
+    const o=ctx.createOscillator(), o2=ctx.createOscillator(), f=ctx.createBiquadFilter(), g=ctx.createGain(), lfo=ctx.createOscillator(), lg=ctx.createGain();
+    const f0=go?60:46, f1=go?210:120;
+    o.type='sawtooth'; o2.type='square';
+    o.frequency.setValueAtTime(f0,t); o.frequency.exponentialRampToValueAtTime(f1,t+D*0.9);
+    o2.frequency.setValueAtTime(f0*0.5,t); o2.frequency.exponentialRampToValueAtTime(f1*0.5,t+D*0.9);
+    f.type='lowpass'; f.Q.value=2; f.frequency.setValueAtTime(240,t); f.frequency.exponentialRampToValueAtTime(go?1500:650,t+D*0.9);
+    lfo.frequency.value=go?28:14; lg.gain.value=0.22; lfo.connect(lg); lg.connect(g.gain);
+    g.gain.setValueAtTime(0.0001,t); g.gain.linearRampToValueAtTime(0.42,t+0.12); g.gain.setValueAtTime(0.42,t+D-0.3); g.gain.exponentialRampToValueAtTime(0.0001,t+D);
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(m);
+    o.start(t); o2.start(t); lfo.start(t); o.stop(t+D+0.05); o2.stop(t+D+0.05); lfo.stop(t+D+0.05);
+    _fxLive.engine.push({at:ctx.currentTime, end:t+D}); _fxCalls.engine++;
   }catch(e){}
 }
 function playStompSfx(){
@@ -4965,6 +4983,84 @@ var ENEMY_ART = (function () {
     return b;
   }
 
+  // ------------------------------------------------------------ GNOME, KNOCKED DOWN (52 x 29 grid)
+  // Lying on his back on the floor as the hallway camera sees him: boots left, head right (dizzy X eyes), beard splayed over the coat,
+  // hat fallen off beside the head, arms flung out, his tool dropped in front, dizzy stars. Same palette + variants as buildGnome.
+  function buildGnomeDown(o) {
+    var W = 52, H = 29, b = buf(W, H), hat = o.hat, coat = o.coat, x, y, t, hl, dx, dy, i0;
+    // legs sprawled apart + boots
+    for (y = 8; y <= 12; y++) span(b, y, 4, 11, 'tuv', (y - 8) / 5 * 0.8 + 0.1);
+    for (y = 15; y <= 19; y++) span(b, y, 4, 11, 'tuv', (y - 15) / 5 * 0.8 + 0.1);
+    box(b, 0, 7, 4, 13, 'tuv'); box(b, 0, 14, 4, 20, 'tuv');
+    for (y = 7; y <= 20; y++) set(b, 0, y, 'v');
+    set(b, 1, 8, 't'); set(b, 2, 8, 't'); set(b, 1, 15, 't'); set(b, 2, 15, 't');
+    // coat torso + belt
+    for (y = 6; y <= 20; y++) span(b, y, (y < 8 || y > 18) ? 11 : 10, 25, coat, (y - 6) / 15);
+    for (y = 6; y <= 20; y++) { set(b, 14, y, 't'); set(b, 15, y, 'u'); }
+    box(b, 14, 12, 15, 14, 'yyy'); set(b, 15, 13, 'Y');
+    for (y = 8; y <= 18; y += 3) { set(b, 19, y, coat[2]); set(b, 22, y + 1, coat[2]); }
+    // arms flung out: one up, one down, cuffs + hands
+    box(b, 21, 2, 29, 5, coat); for (y = 2; y <= 5; y++) { set(b, 30, y, 'x'); set(b, 31, y, 'z'); } box(b, 32, 2, 34, 5, 'sSS');
+    box(b, 22, 19, 30, 22, coat); for (y = 19; y <= 22; y++) { set(b, 31, y, 'x'); set(b, 32, y, 'z'); } box(b, 33, 19, 35, 22, 'sSS');
+    // head: face up, dizzy X eyes, nose
+    disc(b, 32, 12, 6, function (ddx, ddy) { return (ddx + ddy > 0.7) ? 'S' : 's'; });
+    [[30, 10], [35, 10]].forEach(function (e) { set(b, e[0] - 1, e[1] - 1, 'K'); set(b, e[0] + 1, e[1] - 1, 'K'); set(b, e[0], e[1], 'K'); set(b, e[0] - 1, e[1] + 1, 'K'); set(b, e[0] + 1, e[1] + 1, 'K'); });
+    box(b, 32, 12, 33, 13, 'nnn');
+    // beard splayed over the chest and coat
+    for (y = 9; y <= 22; y++) for (x = 13; x <= 38; x++) {
+      dx = (x - 24) / 11; dy = (y - 16) / 5.8;
+      if (dx * dx + dy * dy > 1 || x > 37) continue;
+      if (y <= 13 && x >= 27) continue;                                       // keep the face clear
+      set(b, x, y, 'wxz'[sh((x - 13) / 25 * 0.8, (y - 9) / 13 * 0.9, x, y)]);
+    }
+    for (x = 28; x <= 37; x++) { set(b, x, 14, x < 33 ? 'w' : 'x'); set(b, x, 15, 'w'); }   // moustache
+    for (i0 = 0; i0 < 5; i0++) for (x = 14; x <= 21; x++) if (((x + i0) & 1) && get(b, x, 11 + i0 * 2)) set(b, x, 11 + i0 * 2, 'z');   // strands
+    for (y = 11; y <= 21; y += 2) set(b, 12 + (y % 3), y, 'z');
+    // the hat lies beside the head, tip curling up
+    for (x = 40; x <= 49; x++) {
+      t = (x - 40) / 9; var cy = 16 - t * 4; hl = 5 * (1 - t) + 0.6;
+      for (y = Math.round(cy - hl); y <= Math.round(cy + hl); y++) {
+        var idx = sh(t, (y - (cy - hl)) / (2 * hl + 1), x, y);
+        if (x <= 41) idx = 2; else if (x === 42) idx = (x + y) & 1 ? 0 : idx;
+        set(b, x, y, hat[idx]);
+      }
+    }
+    // the tool, dropped in front of him
+    if (o.tool === 'trowel') {
+      for (x = 6; x <= 16; x++) { set(b, x, 24, 't'); set(b, x, 25, (x & 1) ? 'u' : 't'); }
+      for (y = 23; y <= 26; y++) set(b, 17, y, y < 25 ? 'M' : 'N');
+      for (x = 18; x <= 31; x++) {
+        t = (x - 18) / 13; hl = t < 0.62 ? 0.8 + 2.4 * Math.pow(t / 0.62, 0.75) : 3.2 - (t - 0.62) / 0.38 * 2.4;
+        var y0 = Math.round(25 - hl), y1 = Math.round(25 + hl) - 1;
+        for (y = y0; y <= y1; y++) set(b, x, y, y === y0 ? 'm' : (y === y1 ? 'N' : (y === 24 || y === 25 ? 'M' : (((x + y) & 1) ? 'M' : 'm'))));
+      }
+      set(b, 31, 25, 'w');
+    } else if (o.tool === 'shovel') {
+      for (x = 4; x <= 30; x++) { set(b, x, 24, 't'); set(b, x, 25, (x & 1) ? 'u' : 't'); }
+      for (x = 31; x <= 41; x++) {
+        t = (x - 31) / 10; hl = t < 0.7 ? 3.3 : 3.3 - (t - 0.7) / 0.3 * 2.5;
+        for (y = Math.round(25 - hl); y <= Math.round(25 + hl) - 1; y++) set(b, x, y, y < 25 ? 'm' : (y === 25 ? 'M' : 'N'));
+      }
+    } else if (o.tool === 'knife') {
+      for (x = 8; x <= 14; x++) for (y = 23; y <= 25; y++) set(b, x, y, 'tuv'[y - 23]);
+      for (y = 22; y <= 26; y++) set(b, 15, y, 'Y');
+      for (x = 16; x <= 31; x++) {
+        hl = 1.9 * (1 - (x - 16) / 17) + 0.5;
+        for (y = Math.round(24.5 - hl); y <= Math.round(24.5 + hl) - 1; y++) set(b, x, y, y < 24 ? 'm' : (y === 24 ? 'M' : 'N'));
+      }
+    } else if (o.tool === 'fork') {
+      for (x = 4; x <= 18; x++) { set(b, x, 24, 't'); set(b, x, 25, (x & 1) ? 'u' : 't'); }
+      for (y = 22; y <= 26; y++) { set(b, 19, y, 'm'); set(b, 20, y, 'N'); }
+      for (x = 21; x <= 33; x++) {
+        set(b, x, x >= 31 ? 23 : 22, 'm'); set(b, x, 24, (x & 1) ? 'M' : 'm'); set(b, x, x >= 31 ? 25 : 26, 'N');
+      }
+    }
+    // dizzy stars over the head
+    [[37, 2], [44, 5], [41, 0]].forEach(function (s) { set(b, s[0], s[1], 'o'); set(b, s[0] - 1, s[1], 'y'); set(b, s[0] + 1, s[1], 'y'); set(b, s[0], s[1] - 1, 'y'); set(b, s[0], s[1] + 1, 'y'); });
+    outline(b, 'K');
+    return b;
+  }
+
   // ------------------------------------------------------------ TRACTOR (190 x 124 grid)
   // side-on spoked wheel (used by the SIDE view). rot = rotation in radians (for animation).
   function wheel(b, cx, cy, R, sp, rot) {
@@ -5288,7 +5384,7 @@ var ENEMY_ART = (function () {
   }
 
   var api = {
-    PAL: PAL, VARIANTS: VARIANTS, buildGnome: buildGnome, buildTractor: buildTractor,
+    PAL: PAL, VARIANTS: VARIANTS, buildGnome: buildGnome, buildGnomeDown: buildGnomeDown, buildTractor: buildTractor,
     buildFlame: buildFlame, buildSmoke: buildSmoke, blit: blit, buf: buf, set: set,
     SIDE: SIDE, buildSideBody: buildSideBody, buildSideDriver: buildSideDriver, buildSideWheel: buildSideWheel,
     buildSideSmoke: buildSideSmoke, buildSidePassenger: buildSidePassenger, blitFlip: blitFlip
@@ -5631,6 +5727,8 @@ const GN={
   fall:14, down:120, blink:54, getup:24, dying:16,         // 120 = 2 s lying still, then 54 frames of blinking, then 24 to stand up
   bloodCap:4, bloodFade:1800,
   riders:3, reinf:4/3, kickVX:14, kickVY:24, kickSpin:0.34, kickBounce:0.55, fan:1.3, sep:100, sideX:717, smokeLife:90,   // 3 hop off, the 4th rider reinforces at x1.33 after 2 finish; kick = up+back tumble (same 'air' bounce code as the uppercut)
+  scatSep:120, scatTries:18, scatVZ:6, floorBounces:2, fbMin:4, fbK:0.5, zLo:130, zHi:1300,   // knock scatter: min landing separation, candidate launches tried, max depth drift, 2 floor bounces (each half the height)
+  chRev:105, chV0:6, chAcc:0.2, chVmax:27, chHalfW:150, chZNear:-60, chZFar:80, chClear:32, chDmg:2, chExitZ:45, chPostWait:45, chKnockVX:10, chKnockF:24,   // final charge: rev frames, z speed (units/frame) ramp, hit box, jump-clear height (game px), damage
   freeze:90, rollX0:-1040, tz:1275, rollV:5.2, rollEnd:160, stopT:240, turnT0:240, turnT1:262, hopStart:330, hopGap:45, hopOffFrames:40, slotZ:1235, slotX0:-135, slotDX:90
 };
 GN.kFight=GN.fistY/(GN.rows-GN.hatMidRow);                 // 135/31.5 = 4.29 units per cell -> a gnome is about 163 units tall (Pete = 200)
@@ -5650,6 +5748,11 @@ function eaGnome(variant,red){                              // {full, body, tool
   const body=ENEMY_ART.buf(b.w,b.h), tool=ENEMY_ART.buf(b.w,b.h);
   for(let y=0;y<b.h;y++) for(let x=0;x<b.w;x++){ const c=b.a[y][x]; if(!c) continue; const cut=(variant==='fork'&&y<22)?9:7, xx=mir?W-1-x:x; (xx<=cut?tool:body).a[y][x]=c; }
   const full=eaCanvas(b); return _eaCache[key]={full,body:eaCanvas(body),tool:eaCanvas(tool),white:eaWhite(full)};
+}
+function eaGnomeDown(variant){                             // the knocked-down pose {full, white}
+  const key='gd'+variant; if(_eaCache[key]) return _eaCache[key];
+  const v=ENEMY_ART.VARIANTS[variant], o={}; for(const k in v) o[k]=v[k];
+  const full=eaCanvas(ENEMY_ART.buildGnomeDown(o)); return _eaCache[key]={full,white:eaWhite(full)};
 }
 function eaSideBody(){ return _eaCache.sb||(_eaCache.sb=eaCanvas(ENEMY_ART.buildSideBody(true))); }
 function eaFrontBody(){ return _eaCache.fb||(_eaCache.fb=eaCanvas(ENEMY_ART.buildTractor(true))); }
@@ -5673,6 +5776,7 @@ function l2ResetFight2(){                                   // Pete reached 0 HP
 }
 function l2EventUpdate(){
   const E=LV.ev; if(E.phase==='idle'||!E.tr) return;
+  if(E.phase==='charge'){ l2ChargeUpdate(); return; }
   const tr=E.tr, hold=!!LV.dlg; tr.f++;
   const amp=E.phase==='roll'?(E.t<GN.rollEnd?1:1.5):2;     // engine shake in art cells: rolling 1, idling 1.5, revving 2
   tr.shx=((tr.f>>1)&1)?amp:-amp; tr.shy=(((tr.f+1)>>1)&1)?amp*0.5:-amp*0.5;
@@ -5694,13 +5798,54 @@ function l2EventUpdate(){
     for(const g of LV.gnomes) gnomeUpdate(g);
   } else for(const g of LV.gnomes) if(g.state==='rider'){ const s=gnomeSeat(g); g.x=s.x; g.y=s.y; g.z=s.z; }
 }
+// ---- FINAL CHARGE (after the gnomes are dead and Pete knocks): the tractor + driver REV hard (big shake, smoke burst, engine roar, driver shouts), then
+// FLOOR IT straight down the hall at Pete's X as it was at launch. Jump over it (or step out of its path); caught on the ground = 2 damage + knock tumble.
+// It drives under the camera and away (it does not crash); then the door voice says the coast is clear and the door opens as before.
+function l2OpenDoor(){ LV.door.state='opening'; LV.door.t=0; }
+function l2StartCharge(){
+  const E=LV.ev, tr=E.tr; if(!tr) return;
+  E.phase='charge'; E.ch={t:0,stage:'rev',v:0,x1:0,zt:0,hit:false,knock:0,kdir:1,wait:0};
+  tr.view='front'; tr.sx=1; tr.alpha=1; tr.x=0; tr.z=GN.tz; tr.f=0;
+  showBox([[{text:'GNOME DRIVER: ',color:'#ff9a5a'},{text:'Hehehe... time to MULCH ya, tall one! FLOOR IT!',color:'#e8f8f2'}],'It is coming straight down the hall. JUMP out of the way!']);
+  playEngineSfx('rev');
+}
+function l2ResetCharge(){                                   // Pete reached 0 HP during the charge: the tractor is parked again, he must knock and dodge again
+  const E=LV.ev, tr=E.tr; E.phase='cleared'; E.ch=null; box=null; E.smoke=[];
+  if(tr){ tr.x=0; tr.z=GN.tz; tr.view='front'; tr.sx=1; tr.alpha=1; tr.shx=0; tr.shy=0; }
+}
+function l2ChargeUpdate(){
+  const E=LV.ev, tr=E.tr, c=E.ch; if(!c) return;
+  tr.f++; c.t++;
+  if(c.stage==='rev'){
+    const amp=4+Math.min(2,c.t/40); tr.shx=(tr.f&1)?amp:-amp; tr.shy=((tr.f>>1)&1)?amp*0.6:-amp*0.6;   // big shake every frame
+    l2SmokeUpdate(E,tr,c.t);
+    if(c.t>=GN.chRev){ c.stage='go'; c.t=0; c.v=GN.chV0; c.x1=pete.hx; c.zt=Math.max(pete.hz,GN.chExitZ+60); playEngineSfx('go'); }   // aims at Pete's spot right now
+  } else if(c.stage==='go'){
+    c.v=Math.min(GN.chVmax,c.v+GN.chAcc); tr.z-=c.v;
+    const u=Math.min(1,(GN.tz-tr.z)/(GN.tz-c.zt)); tr.x=c.x1*u;
+    tr.shx=(tr.f&1)?2:-2; tr.shy=((tr.f>>1)&1)?1:-1;
+    tr.alpha=Math.max(0,Math.min(1,(tr.z-GN.chExitZ)/70));                       // it passes under the camera
+    l2SmokeUpdate(E,tr,c.t);
+    const dz=tr.z-pete.hz, air=ROAD-footY(pete);
+    if(!c.hit && dz>=GN.chZNear && dz<=GN.chZFar && Math.abs(tr.x-pete.hx)<GN.chHalfW && air<GN.chClear){   // on the ground inside the tractor's path as it passes his depth
+      c.hit=true; cancelAttack(); pete.hurt=0; l2HurtPete(null,{dmg:GN.chDmg});
+      if(E.phase!=='charge') return;                                               // that killed him: normal Level 2 reset (l2ResetCharge ran)
+      c.knock=GN.chKnockF; c.kdir=pete.hx>=tr.x?1:-1; pete.vy=-JUMP*0.9; pete.onGround=false; pete.vx=0;
+    }
+    if(tr.z<=GN.chExitZ){ c.stage='gone'; c.wait=0; tr.alpha=0; E.smoke=[]; }
+  } else if(c.stage==='gone'){
+    if(++c.wait>=GN.chPostWait){ E.phase='post'; E.tr=null; E.ch=null; box=null; l2StartDialog(LV.def.dialogs.clear.slice(1),l2OpenDoor); return; }   // tractor gone: the voice lets him in
+  }
+  if(c.knock>0){ const xl=HL.xLimit(pete.hz); pete.hx=Math.max(-xl,Math.min(xl,pete.hx+c.kdir*GN.chKnockVX*c.knock/GN.chKnockF)); c.knock--; }   // knock tumble: arc up + skid sideways
+}
 // exhaust smoke: world-space puffs spawned at the stack tops (both views), drawn with the tractor; more + darker during rev pulses
 function l2SmokeUpdate(E,tr,t){
   if(!E.smoke) E.smoke=[];
-  E.rev=E.phase!=='roll' && (t%240)<80;                    // rev pulse: 80 frames out of every 240 once the tractor has stopped
-  const side=tr.view==='side', W=side?264:190, H=side?150:124, st=side?ENEMY_ART.SIDE.stacks.map(s=>[s+4,44]):[[51,4],[139,4]], every=E.rev?1:4;
+  const chg=E.phase==='charge';
+  E.rev=chg || (E.phase!=='roll' && (t%240)<80);          // rev pulse: 80 frames out of every 240 once the tractor has stopped (the final charge revs the whole time)
+  const side=tr.view==='side', W=side?264:190, H=side?150:124, st=side?ENEMY_ART.SIDE.stacks.map(s=>[s+4,44]):[[51,4],[139,4]], every=chg?(E.ch&&E.ch.stage==='rev'?1:2):(E.rev?1:4);
   if(tr.sx>0.3 && t%every===0) st.forEach((c,k)=>{
-    const n=E.rev?2:1; for(let j=0;j<n;j++) E.smoke.push({X:tr.x+(c[0]-W/2+tr.shx)*GN.kT*tr.sx+(Math.random()-0.5)*6, Y:(H-c[1]-tr.shy)*GN.kT, vx:0.25+Math.random()*0.5, vy:1.1+Math.random()*0.8+(E.rev?0.6:0),
+    const n=chg?(E.ch&&E.ch.stage==='rev'&&E.ch.t<24?5:3):(E.rev?2:1); for(let j=0;j<n;j++) E.smoke.push({z:tr.z,X:tr.x+(c[0]-W/2+tr.shx)*GN.kT*tr.sx+(Math.random()-0.5)*6, Y:(H-c[1]-tr.shy)*GN.kT, vx:0.25+Math.random()*0.5, vy:1.1+Math.random()*0.8+(E.rev?0.6:0),
       r:7+Math.random()*4+(E.rev?3:0), gr:0.32+Math.random()*0.15, age:0, life:GN.smokeLife*(0.8+Math.random()*0.4), dark:E.rev?0.75+Math.random()*0.25:0.15+Math.random()*0.3, ph:Math.random()*6+k}); });
   for(let i=E.smoke.length-1;i>=0;i--){ const p=E.smoke[i]; p.age++; p.X+=p.vx+Math.sin((p.age+p.ph*9)*0.09)*0.35; p.Y+=p.vy; p.vy*=0.992; p.r+=p.gr; if(p.age>=p.life) E.smoke.splice(i,1); }
 }
@@ -5742,10 +5887,7 @@ function gnomeUpdate(g){
       else if(g.t>=GN.kickMax){ g.y=0; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=GN.landSq; } } break; }
     case 'wall': { g.x=Math.max(-GN.wallX,Math.min(GN.wallX,g.x+g.vx)); g.y=Math.max(0,g.y-6);
       if(g.t>=GN.wallFrames){ g.y=0; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=GN.landSq; } } break; }
-    case 'air': { const Hg=GN.rows*g.k; g.vy-=GN.grav; g.y+=g.vy; g.x+=g.vx; g.rot+=g.vr;                      // g.vr = cartoon tumble (kick only)
-      if(Math.abs(g.x)>=GN.wallX){ g.x=Math.sign(g.x)*GN.wallX; g.vx*=-(g.kick?GN.kickBounce:GN.wallBounce); g.vr*=-0.7; g.stut=GN.stutter; g.flash=4; if(g.kick) g.sq=8; g.bounces=(g.bounces||0)+1; l2Burst(g.x,g.z,'dust',g.kick?10:6); }
-      if(g.y+Hg>=GN.ceil && g.vy>0){ g.y=GN.ceil-Hg; g.vy=-Math.abs(g.vy)*(g.kick?0.5:0.4); g.sq=g.kick?8:6; g.stut=GN.stutter; g.flash=4; g.bounces=(g.bounces||0)+1; if(g.kick) l2Burst(g.x,g.z,'dust',8); }   // the hat hits the ceiling and bounces
-      if(g.y<=0 && g.vy<0){ g.y=0; g.vy=0; g.rot=0; g.vr=0; g.kick=false; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=0; } } break; }
+    case 'air': { if(gnomeAirStep(g,false)){ g.y=0; g.vy=0; g.vz=0; g.rot=0; g.vr=0; g.kick=false; g.scat=false; g.lx=undefined; g.lz=undefined; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=0; } } break; }
     case 'land': if(g.t>=GN.landSq+GN.stagger){ g.state='idle'; g.t=0; } break;
     case 'fall': if(g.t>=GN.fall){ g.state='down'; g.t=0; } break;
     case 'down': if(g.t>=GN.down){ g.state='blink'; g.t=0; } break;
@@ -5754,13 +5896,41 @@ function gnomeUpdate(g){
     case 'dying': if(g.t>=GN.dying) g.state='dead'; break;
   }
 }
+// One physics step of a knocked-through-the-air gnome (also run on a throw-away copy to PREDICT where it lands). Returns true when it has come to rest on the floor.
+function gnomeAirStep(g,sim){
+  const Hg=GN.rows*g.k; g.vy-=GN.grav; g.y+=g.vy; g.x+=g.vx; g.z+=g.vz||0; g.rot+=g.vr;                  // g.vr = cartoon tumble
+  if(g.z<GN.zLo){ g.z=GN.zLo; g.vz=Math.abs(g.vz)*0.5; } else if(g.z>GN.zHi){ g.z=GN.zHi; g.vz=-Math.abs(g.vz)*0.5; }   // stays inside the hall depth
+  if(Math.abs(g.x)>=GN.wallX){ g.x=Math.sign(g.x)*GN.wallX; g.vx*=-(g.kick?GN.kickBounce:GN.wallBounce); g.vr*=-0.7; g.stut=GN.stutter; g.flash=4; if(g.kick) g.sq=8; g.bounces=(g.bounces||0)+1; if(!sim) l2Burst(g.x,g.z,'dust',g.kick?10:6); }
+  if(g.y+Hg>=GN.ceil && g.vy>0){ g.y=GN.ceil-Hg; g.vy=-Math.abs(g.vy)*(g.kick?0.5:0.4); g.sq=g.kick?8:6; g.stut=GN.stutter; g.flash=4; g.bounces=(g.bounces||0)+1; if(g.kick&&!sim) l2Burst(g.x,g.z,'dust',8); }   // the hat hits the ceiling and bounces
+  if(g.y<=0 && g.vy<0){ g.y=0;
+    if(g.scat && (g.fb||0)<GN.floorBounces && g.vy<-GN.fbMin){ g.vy=-g.vy*GN.fbK; g.vx*=0.7; g.vz=(g.vz||0)*0.7; g.vr*=-0.6; g.fb=(g.fb||0)+1; g.sq=6; g.stut=GN.stutter; g.bounces=(g.bounces||0)+1; if(!sim) l2Burst(g.x,g.z,'dust',6); }   // decreasing floor bounces
+    else return true; }
+  return false;
+}
+// Launch a kicked / uppercut gnome with randomised angle, spin and sideways drift; the landing spot is predicted by simulating the same physics and the
+// first candidate that keeps GN.scatSep away from every other gnome is used (else the roomiest), so they never pile up in one spot.
+function gnomeLaunch(g,kind,dir){
+  const R=Math.random, others=LV.gnomes.filter(o=>o!==g&&o.state!=='dead'&&o.state!=='dying'&&o.state!=='rider'&&o.state!=='hopoff').map(o=>(o.state==='air'&&o.lx!==undefined)?[o.lx,o.lz]:[o.x,o.z]);
+  let best=null;
+  for(let n=0;n<GN.scatTries;n++){
+    const c=kind==='kick'?{vx:dir*GN.kickVX*(0.5+R()*0.9),vy:GN.kickVY*(0.88+R()*0.24),vr:GN.kickSpin*dir*(0.6+R()*1.3)*(R()<0.25?-1:1)}
+                         :{vx:dir*GN.upVX*(0.4+R()*1.3),vy:GN.upV*(1+R()*0.08),vr:GN.kickSpin*dir*(0.5+R()*0.9)*(R()<0.25?-1:1)};
+    c.vz=(R()-0.5)*2*GN.scatVZ;
+    const s={x:g.x,y:0,z:g.z,vx:c.vx,vy:c.vy,vz:c.vz,vr:c.vr,rot:0,k:g.k,fb:0,bounces:0,sq:0,stut:0,flash:0,scat:true,kick:true};
+    let f=0; while(f<500 && !gnomeAirStep(s,true)) f++;
+    let md=1e9; for(const o of others) md=Math.min(md,Math.hypot(s.x-o[0],(s.z-o[1])*0.8));
+    c.lx=s.x; c.lz=s.z; c.score=md;
+    if(!best||md>best.score) best=c;
+    if(md>=GN.scatSep) break;
+  }
+  g.state='air'; g.t=0; g.vx=best.vx; g.vy=best.vy; g.vz=best.vz; g.vr=best.vr; g.kick=true; g.scat=true; g.fb=0; g.lx=best.lx; g.lz=best.lz;
+}
 function gnomeHit(g,kind,dir){                              // every hit = 1 HP: stutter; a kick flies back to the wall; an uppercut flies up to the ceiling
   g.hp-=1; g.flash=6; g.stut=GN.stutter; g.fz=4; g.red=true; g.fd=dir; g.downAfter=g.hp<=0; g.y=0;
   l2Burst(g.x,g.z,'dust',5);
   if(g.state==='windup') g.cd=GN.cdHit;
   g.rot=0; g.vr=0; g.kick=false; g.bounces=0;
-  if(kind==='kick'){ g.state='air'; g.t=0; g.vx=GN.kickVX*dir; g.vy=GN.kickVY; g.kick=true; g.vr=GN.kickSpin*dir; }   // comic kick: up AND back in a big arc, tumbling, bounces off the ceiling or the wall (whichever it meets first)
-  else if(kind==='upper'){ g.state='air'; g.t=0; g.vx=GN.upVX*dir; g.vy=GN.upV; }
+  if(kind==='kick'||kind==='upper') gnomeLaunch(g,kind,dir);   // comic kick / uppercut: up and back in a big randomised arc, tumbling, bounces off the ceiling / walls / floor and lands at a random spot
   else { g.state='stut'; g.t=0; g.x=Math.max(-GN.wallX,Math.min(GN.wallX,g.x+dir*GN.push)); }
 }
 function l2StickBlood(){ pete.footBlood=Math.min(GN.bloodCap,(pete.footBlood||0)+1); }
@@ -5788,11 +5958,15 @@ function l2GnomeLand(dir){
   }
 }
 // ---- drawing ----
-function l2SideClipX(tr){ return HL.proj(-GN.sideX,0,tr.z).x; }   // the near edge of the dark side-hall opening in the left wall: everything left of it is still inside the side hall (hidden)
+// ROOT CAUSE of "tractor in front of the side wall": the tractor is drawn in the depth-sorted pass AFTER the whole hall, but the left STEM wall
+// (x -430, z 90..1160) is nearer the camera than the tractor (z 1275) and covers the screen up to its far edge. The old clip line was the
+// tractor-plane x of the splayed corner wall (-717), which is further left on screen than that far edge, so a band of tractor pixels was
+// painted over the stem wall face. The tractor may only show through the stem's far opening: clip at the stem wall's far edge (-halfW @ junction z0).
+function l2SideClipX(tr){ const D=LEVEL_DEFS.level2; return HL.proj(-D.hall.halfW,0,D.junction.z0).x; }
 function drawTractorEv(){
   const E=LV.ev, tr=E.tr; if(!tr) return;
-  ctx.save(); ctx.beginPath(); ctx.rect(l2SideClipX(tr),0,5000,5000); ctx.clip();
-  const side=tr.view==='side', S=ENEMY_ART.SIDE, W=side?264:190, H=side?150:124, pc=GN.kT*HL.depthScale(tr.z), base=HL.proj(tr.x,0,tr.z), f=tr.f>>1;
+  ctx.save(); if(E.phase==='roll'){ ctx.beginPath(); ctx.rect(l2SideClipX(tr),0,5000,5000); ctx.clip(); }   // only while it is still coming out of the side hall
+  const side=tr.view==='side', S=ENEMY_ART.SIDE, W=side?264:190, H=side?150:124, pc=GN.kT*HL.depthScale(tr.z), base=HL.proj(tr.x,0,tr.z), f=E.phase==='charge'?tr.f:tr.f>>1;
   ctx.save(); ctx.globalAlpha=tr.alpha; ctx.imageSmoothingEnabled=false;
   ctx.fillStyle='rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(base.x,base.y,W*0.46*pc*Math.max(0.05,tr.sx),9*pc,0,0,7); ctx.fill();
   ctx.translate(base.x,base.y); ctx.scale(Math.max(0.02,tr.sx),1);
@@ -5807,7 +5981,7 @@ function drawTractorEv(){
   }
   ctx.restore();
   if(E.smoke) for(const p of E.smoke){                         // exhaust puffs: grey (black during revs), rising, drifting, growing and fading, in hall depth
-    const q=HL.proj(p.X,p.Y,tr.z-1), u=p.age/p.life, a=Math.min(1,p.age/6)*(1-u)*0.7, rr=p.r*q.s, c=Math.round(150-118*p.dark);
+    const q=HL.proj(p.X,p.Y,(p.z||tr.z)-1), u=p.age/p.life, a=Math.min(1,p.age/6)*(1-u)*0.7, rr=p.r*q.s, c=Math.round(150-118*p.dark);
     ctx.globalAlpha=a*0.55; ctx.fillStyle='rgb('+(c+22)+','+(c+22)+','+(c+24)+')'; ctx.beginPath(); ctx.arc(q.x,q.y,rr,0,7); ctx.fill();
     ctx.globalAlpha=a; ctx.fillStyle='rgb('+c+','+c+','+(c+2)+')'; ctx.beginPath(); ctx.arc(q.x-rr*0.12,q.y-rr*0.1,rr*0.66,0,7); ctx.fill(); }
   ctx.restore();
@@ -5816,7 +5990,7 @@ function drawGnomeMob(g){
   const tr=LV.ev.tr, rider=g.state==='rider', sideRider=rider&&tr&&tr.view==='side';
   const P=HL.proj(g.x,g.y,g.z), F=HL.proj(g.x,0,g.z), pc=g.k*P.s, spr=eaGnome(g.v,g.red&&!rider), mir=!!ENEMY_ART.VARIANTS[g.v].mirror;
   const face=sideRider?1:(rider?(pete.hx>=g.x?1:-1):g.face), flip=((face>0)!==mir), st=g.state, t=g.t;
-  let ssx=1, ssy=1, rot=0, jx=0, lift=0, vis=true, split=false, tdx=0, tdy=0;
+  let ssx=1, ssy=1, rot=0, jx=0, lift=0, vis=true, split=false, tdx=0, tdy=0, lying=false;
   const ts=mir?1:-1;                                                              // side of the sprite the weapon is on (before the flip)
   if(g.stut>0 && st!=='fall') jx=((g.stut>>1)&1)?1.2:-1.2;                       // hit stutter: quick left/right shake
   if(st==='hop'){ if(t<=GN.hopCrouch){ const u=t/GN.hopCrouch; ssy=1-0.2*u; ssx=1+0.15*u; } else if(t<=GN.hopCrouch+GN.hopAir){ const u=(t-GN.hopCrouch)/GN.hopAir; ssy=1+0.15*(1-u); ssx=1/Math.sqrt(ssy); } else { const u=Math.min(1,(t-GN.hopCrouch-GN.hopAir)/6); ssy=0.78+0.22*u; ssx=1.18-0.18*u; } }   // bunny hop: crouch, stretch, land squash
@@ -5827,20 +6001,24 @@ function drawGnomeMob(g){
   else if(st==='air'&&g.kick){ rot=g.rot; if(g.sq>0){ ssx=1.3; ssy=0.72; rot=g.rot*0.3; } }   // comic kick: full cartoon tumble, SQUASH flat on the ceiling / wall impact
   else if(st==='fly'||st==='wall'||st==='air'){ rot=g.fd*0.55; if(st==='wall'||g.sq>0){ ssx=0.8; ssy=1.12; } }
   else if(st==='land'){ if(t<GN.landSq){ const u=t/GN.landSq; ssy=0.7+0.3*u; ssx=1.25-0.25*u; } }
-  else if(st==='fall'){ const u=t/GN.fall; rot=g.fd*Math.PI/2*u*u; }
-  else if(st==='down'){ rot=g.fd*Math.PI/2; }
-  else if(st==='blink'){ rot=g.fd*Math.PI/2; vis=(Math.floor(t/6)%2===0); }
-  else if(st==='getup'){ const u=t/GN.getup; rot=g.fd*Math.PI/2*(1-u*u); }
-  else if(st==='dying'){ const u=Math.min(1,t/GN.dying); rot=(g.fd||0)*Math.PI/2; ssy=1-0.9*u; ssx=1+0.55*u; }
-  if(Math.abs(rot)>0.4 && st!=='air') lift=14*pc*Math.min(1,Math.abs(rot)/(Math.PI/2));       // lying down: lift the body onto the floor line
+  else if(st==='fall'){ const u=t/GN.fall; if(u<0.6) rot=g.fd*0.9*Math.pow(u/0.6,2); else { lying=true; const v=(u-0.6)/0.4; ssy=0.8+0.2*v; ssx=1.2-0.2*v; } }   // topples over, then the KNOCKED-DOWN sprite slaps onto the floor
+  else if(st==='down'){ lying=true; }
+  else if(st==='blink'){ lying=true; vis=(Math.floor(t/6)%2===0); }
+  else if(st==='getup'){ const u=t/GN.getup; if(u<0.45) lying=true; else rot=g.fd*0.9*Math.pow(1-(u-0.45)/0.55,2); }   // pushes up off the floor, then stands
+  else if(st==='dying'){ const u=Math.min(1,t/GN.dying); lying=true; ssy=1-0.9*u; ssx=1+0.55*u; }
+  if(!lying && Math.abs(rot)>0.4 && st!=='air') lift=14*pc*Math.min(1,Math.abs(rot)/(Math.PI/2));       // tipping over: lift the body onto the floor line
   if(!vis) return;
+  const fl=lying?(g.fd<0):flip;                                                    // the downed sprite lies head-first away from Pete
   ctx.save(); ctx.imageSmoothingEnabled=false;
   if(tr&&rider){ ctx.globalAlpha=tr.alpha; ctx.beginPath(); ctx.rect(l2SideClipX(tr),0,5000,5000); ctx.clip(); }   // riders are hidden inside the side hall too
-  if(!rider){ const hs=Math.max(0.35,1-g.y/260); ctx.fillStyle='rgba(0,0,0,'+(0.36*hs)+')'; ctx.beginPath(); ctx.ellipse(F.x,F.y,13*pc*hs*(st==='dying'?ssx:1),3.6*pc*hs,0,0,7); ctx.fill(); }   // floor shadow stays on the floor
-  ctx.translate(P.x+jx*pc,P.y-lift); ctx.scale(ssx,ssy); ctx.rotate(rot); ctx.scale(flip?-1:1,1);
+  if(!rider){ const hs=Math.max(0.35,1-g.y/260); ctx.fillStyle='rgba(0,0,0,'+(0.36*hs)+')'; ctx.beginPath(); ctx.ellipse(F.x,F.y,(lying?21:13)*pc*hs*(st==='dying'?ssx:1),(lying?4.6:3.6)*pc*hs,0,0,7); ctx.fill(); }   // floor shadow stays on the floor
+  ctx.translate(P.x+jx*pc,P.y-lift); ctx.scale(ssx,ssy); ctx.rotate(rot); ctx.scale(fl?-1:1,1);
   const dw=(c,ox,oy)=>ctx.drawImage(c,(-17+ox)*pc,(-38+oy)*pc,c.width*pc,c.height*pc);
+  if(lying){ const d=eaGnomeDown(g.v); ctx.drawImage(d.full,-26*pc,-d.full.height*pc,d.full.width*pc,d.full.height*pc); if(g.flash>0){ ctx.globalAlpha*=0.6; ctx.drawImage(d.white,-26*pc,-d.full.height*pc,d.full.width*pc,d.full.height*pc); } }
+  else {
   if(split){ dw(spr.body,0,0); dw(spr.tool,tdx,tdy); } else dw(spr.full,0,0);
   if(g.flash>0){ ctx.globalAlpha*=0.6; dw(spr.white,0,0); }
+  }
   ctx.restore();
 }
 function mobPlace(m){ m.x=m.cx+m.rx*Math.cos(m.a); m.z=m.cz+m.rz*Math.sin(m.a); m.th=Math.atan2(m.rz*Math.cos(m.a)*m.w,-m.rx*Math.sin(m.a)*m.w); }
@@ -5918,10 +6096,12 @@ function l2NearDoor(){ const D=LV.def, dr=D.door; return pete.hx>=D.hall.halfW-D
 function l2MobsAlive(){ let n=0; for(const m of LV.mobs) if(m.state==='alive') n++; return n; }
 function l2OpenDialog(){
   const D=LV.def, ph=LV.ev.phase;
+  if(ph==='charge') return;                                  // the tractor is charging: no door talk
   cancelAttack(); pete.vx=0; pete.walk=0; pete.face='right'; pete.lastDir='D'; pete.walkReleaseAt=null;   // demo: Pete turns to the door (right wall), guard idle
-  if(l2MobsAlive()>0 || (ph!=='idle' && ph!=='cleared')) l2StartDialog(D.dialogs.refuse,null);                // roaches or gnomes outside: LET ME IN DAMNIT! / Too late! + hiss
+  if(l2MobsAlive()>0 || (ph!=='idle' && ph!=='cleared' && ph!=='post')) l2StartDialog(D.dialogs.refuse,null);   // roaches or gnomes outside: LET ME IN DAMNIT! / Too late! + hiss
   else if(ph==='idle') l2StartDialog(D.dialogs.gone,l2StartEvent);                                          // roaches dead: "mobs are gone" -> "What are you doing here?!" -> the tractor rolls in
-  else l2StartDialog(D.dialogs.clear,()=>{ LV.door.state='opening'; LV.door.t=0; });                       // gnomes dead: the old "coast is clear" dialog, then the door opens
+  else if(ph==='cleared') l2StartDialog(D.dialogs.clear.slice(0,1),l2StartCharge);                         // gnomes dead: Pete knocks -> the tractor revs and CHARGES (final event) before the door opens
+  else l2StartDialog(D.dialogs.clear.slice(1),l2OpenDoor);                                                 // after the charge: "coast is clear", then the door opens
 }
 // ---- mobs ----
 function updateMobs(){
@@ -5962,7 +6142,7 @@ function l2HurtPete(m,T){                                  // demo hurtPete(): 1
   pete.hurt=LV.def.invul; LV.hurtFlash=8; LV.hp-=T.dmg;
   playHitSfx();   // "UMPH!" (same injury path as Level 1's debris collision)
   if(LV.hp<=0){ LV.hp=LV.hpMax; pete.hx=LV.def.play.spawn.x; pete.hz=LV.def.play.spawn.z; pete.hurt=120; LV.hurtFlash=30; cancelAttack();   // demo: refill, back to the hall start (roaches and goo stay)
-    if(LV.ev.phase==='fight'||LV.ev.phase==='rev') l2ResetFight2(); }                                                                                                  // fight 2: the gnomes climb back on the tractor, blood cleared
+    if(LV.ev.phase==='fight'||LV.ev.phase==='rev') l2ResetFight2(); else if(LV.ev.phase==='charge') l2ResetCharge(); }                                                                                                  // fight 2: the gnomes climb back on the tractor, blood cleared
 }
 // ---- goo + particles (demo addGoo / burst / goo+fx update) ----
 function l2AddGoo(x,z){
@@ -6037,7 +6217,7 @@ function l2Update(){
   }
   if(LV.door.state==='open' && !LV.exit && pete.hx>=D.hall.halfW-34 && pete.hz>=D.door.z0+30 && pete.hz<=D.door.z1-30){ LV.exit=1; cancelAttack(); pete.vx=0; pete.walk=0; pete.face='right'; }   // walked into the open doorway: end of Level 2
   l2HintBox();
-  if(LV.door.state==='closed' && l2NearDoor()){ pickupPrompt=true; if(LV.pressE) l2OpenDialog(); }   // Y on touch lights up through pickupPrompt
+  if(LV.door.state==='closed' && l2NearDoor() && LV.ev.phase!=='charge'){ pickupPrompt=true; if(LV.pressE) l2OpenDialog(); }   // Y on touch lights up through pickupPrompt
   if(!LV.hint.shown){ for(const m of LV.mobs){ if(m.state==='alive' && Math.hypot(m.x-pete.hx,m.z-pete.hz)<=D.hint.dist){ LV.hint.shown=true; break; } } }
   else LV.hint.age++;
   LV.pressE=false; LV.pressConfirm=false;
@@ -6078,7 +6258,7 @@ function drawLevel2(){
   if(LV.exit>0){ ctx.fillStyle='rgba(0,0,0,'+Math.min(1,LV.exit/L2_EXIT_FRAMES)+')'; ctx.fillRect(0,VIEW_TOP,W,PLAYFIELD_BOTTOM-VIEW_TOP); }   // fade out into the end screen
   if(!LV.dlg){
     l2DrawBubble();
-    if(LV.door.state==='closed' && l2NearDoor()){          // demo interaction prompt over Pete's head
+    if(LV.door.state==='closed' && l2NearDoor() && LV.ev.phase!=='charge'){          // demo interaction prompt over Pete's head
       const txt=(TOUCH?'Y':'E')+'   talk to door', y=Math.max(VIEW_TOP+30,LV.headY-8);
       ctx.font='bold 15px Trebuchet MS'; const tw=ctx.measureText(txt).width+22;
       ctx.fillStyle='rgba(0,0,0,.78)'; ctx.fillRect(LV.headX-tw/2,y-16,tw,26);
