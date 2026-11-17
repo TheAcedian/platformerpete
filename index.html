@@ -301,7 +301,7 @@ function stopAllMusic(){ stopMusic(); stopDescentMusic(); stopLevel2Music(); }
 // loop body bars 1-6 = A (4 bars) : B (2 bars). Own Tone.Loop; shares the Transport (states never overlap).
 // =====================================================================
 let _m2On=false, _m2Built=false, _m2Nodes={}, _m2Seq=null, _m2Step=0, _m2IntroPlayed=false;
-const _M2_TEMPO=146, _M2_TOTAL=112, _M2_LOOP_START=16, _M2_VOL=0.39 /* 0.78 x 0.5 = -6 dB: Level 2 polish, Michael asked for half volume (this track only) */, _M2_GRIT=0.58, _M2_DARK=0.70, _M2_LEAD=0.85;
+const _M2_TEMPO=146, _M2_TOTAL=112, _M2_LOOP_START=16, _M2_VOL=0.26 /* 0.39 x 2/3 = about -3.5 dB more: Michael asked for 1/3 less (was 0.78 x 0.5 = 0.39; this track only) */, _M2_GRIT=0.58, _M2_DARK=0.70, _M2_LEAD=0.85;
 function initLevel2Music(){
   if(_m2Built || typeof Tone==='undefined') return;
   try{
