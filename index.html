@@ -506,8 +506,8 @@ function collapseBoom(){                      // the big final impact as the bui
 // Fired from updatePlatformer at the move's contact frame (ATTACK_HIT_TT), once per attack. Muted = no nodes made.
 // =====================================================================
 let _fxN=null;
-const _FX_CAP={jab:4, stomp:2, tick:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[], tick:[]};
-let _fxCalls={jab:0, stomp:0, tick:0};          // debug counters (incremented only when a sound is actually built)
+const _FX_CAP={jab:4, stomp:2, tick:2, fall:2, fire:2, hit:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[], tick:[], fall:[], fire:[], hit:[]};
+let _fxCalls={jab:0, stomp:0, tick:0, fall:0, fire:0, hit:0};          // debug counters (incremented only when a sound is actually built)
 function _fxInit(){
   if(_fxN) return _fxN;
   const AC=Tone.context.rawContext;
@@ -524,7 +524,11 @@ function _fxInit(){
   const sc=AC.createDynamicsCompressor(); sc.threshold.value=-16; sc.ratio.value=20; sc.knee.value=3; sc.attack.value=0.003; sc.release.value=0.2;
   const ss=sat(); sm.connect(hp); hp.connect(sc); sc.connect(ss); ss.connect(out);
   const mk=(sec)=>{ const n=Math.floor(AC.sampleRate*sec), b=AC.createBuffer(1,n,AC.sampleRate), d=b.getChannelData(0); for(let i=0;i<n;i++) d[i]=Math.random()*2-1; return b; };
-  _fxN={AC, out, jab:jm, stomp:sm, nbJ:mk(1), nbS:mk(3)};
+  // VOICE bus (fall / fire / hit): master -> gentle comp -> out (own bus, music + other SFX untouched)
+  const vm=AC.createGain(); vm.gain.value=0.7;
+  const vc=AC.createDynamicsCompressor(); vc.threshold.value=-12; vc.ratio.value=4; vc.knee.value=8; vc.attack.value=0.005; vc.release.value=0.15;
+  vm.connect(vc); vc.connect(out);
+  _fxN={AC, out, jab:jm, stomp:sm, vox:vm, nbJ:mk(1), nbS:mk(3)};
   return _fxN;
 }
 // gate: muted / no Tone / context not running => no audio calls at all. Voice cap + min gap per sound.
@@ -661,6 +665,102 @@ function playTickSfx(tock){
   }catch(e){}
 }
 
+// =====================================================================
+// INJURY / FALL VOICES (original, synthesized; a stylized "voice", not a recording). Same plumbing as the jab/stomp/tick:
+// raw Web Audio on Tone's context, fresh short-lived voices per call (no shared envelope), per-kind cap + min gap via _fxGate,
+// each call has its own bus gain so stopInjurySfx() can fade everything out on restart / state change. Muted = no nodes made.
+//   playFallSfx(len)  falling yell with downward glide + wind, fades out over len seconds (hole fall ~1.8s, timer-out fall ~2.6s)
+//   playFireHurtSfx() sizzle (filtered crackle/hiss) + short sharp pained "AHH!"
+//   playHitSfx()      "UMPH!" chest-hit grunt + soft body thump
+// =====================================================================
+function _fxEnv(g,t,pts){      // pts = [[timeOffset,value],...], values > 0: first = set, second = linear, rest = exponential
+  g.setValueAtTime(pts[0][1],t+pts[0][0]);
+  for(let i=1;i<pts.length;i++){ if(i===1) g.linearRampToValueAtTime(pts[i][1],t+pts[i][0]); else g.exponentialRampToValueAtTime(pts[i][1],t+pts[i][0]); }
+}
+function _fxNoiseSrc(N,t,D){ const s=N.AC.createBufferSource(); s.buffer=N.nbS; s.loop=true; s.start(t,Math.random()*1.5); s.stop(t+D+0.05); return s; }
+// formant voice: sawtooth glottal source (+breath noise) -> 3 parallel band-pass formants -> envelope -> low-pass -> bus
+function _fxVox(N,bus,t,o){
+  const ctx=N.AC, D=o.dur, end=t+D+0.05, W=[1,0.6,0.3], Q=[6,8,10];
+  const src=ctx.createGain(), env=ctx.createGain(), lp=ctx.createBiquadFilter();
+  const osc=ctx.createOscillator(); osc.type='sawtooth';
+  _fxEnv(osc.frequency,t,o.f0);
+  const og=ctx.createGain(); og.gain.value=0.5; osc.connect(og); og.connect(src);
+  if(o.vib){ const l=ctx.createOscillator(), lg=ctx.createGain(); l.frequency.value=o.vib[0]; lg.gain.value=o.vib[1]; l.connect(lg); lg.connect(osc.frequency); l.start(t); l.stop(end); }
+  if(o.breath){ const n=_fxNoiseSrc(N,t,D), ng=ctx.createGain(); ng.gain.value=o.breath; n.connect(ng); ng.connect(src); }
+  for(let i=0;i<3;i++){
+    const bp=ctx.createBiquadFilter(), bg=ctx.createGain(); bp.type='bandpass'; bp.Q.value=Q[i]; bg.gain.value=W[i]*3;
+    _fxEnv(bp.frequency,t,[[0,o.fm[i][0]],[D,o.fm[i][1]]]);
+    src.connect(bp); bp.connect(bg); bg.connect(env);
+  }
+  env.gain.value=0.0001; _fxEnv(env.gain,t,o.gain);
+  lp.type='lowpass'; lp.Q.value=0.7; _fxEnv(lp.frequency,t,[[0,o.lp[0]],[D,o.lp[1]]]);
+  env.connect(lp); lp.connect(bus);
+  osc.start(t); osc.stop(end);
+}
+function playFallSfx(len){
+  const N=_fxGate('fall'); if(!N) return;
+  try{
+    const ctx=N.AC, t=ctx.currentTime+0.01, D=Math.max(1.2,Math.min(2.8,len||1.8)), r=(a,b)=>a+Math.random()*(b-a);
+    const vb=ctx.createGain(); vb.connect(N.vox);
+    const top=r(430,500);
+    // "aaaahhh...": a surprised onset, then a long downward pitch glide; vowel closes, low-pass closes, volume dies = he drops away
+    _fxVox(N,vb,t,{dur:D, f0:[[0,top*0.8],[0.12,top],[D*0.35,top*0.62],[D,95]], fm:[[820,380],[1250,700],[2600,1300]], vib:[r(5.5,6.5),22], breath:0.1,
+      lp:[6000,320], gain:[[0,0.0001],[0.06,1],[D*0.4,0.75],[D*0.7,0.2],[D,0.0001]]});
+    // wind whoosh: band-pass sweeping down (pitch of the rushing air drops as he recedes), swells then fades
+    const w=_fxNoiseSrc(N,t,D), wb=ctx.createBiquadFilter(), wg=ctx.createGain(); wb.type='bandpass'; wb.Q.value=0.7;
+    _fxEnv(wb.frequency,t,[[0,2200],[D,300]]); wg.gain.value=0.0001; _fxEnv(wg.gain,t,[[0,0.0001],[D*0.25,0.28],[D*0.6,0.15],[D,0.0001]]);
+    w.connect(wb); wb.connect(wg); wg.connect(vb);
+    _fxLive.fall.push({at:ctx.currentTime, end:t+D+0.06, bus:vb}); _fxCalls.fall++;
+  }catch(e){}
+}
+function playFireHurtSfx(){
+  const N=_fxGate('fire'); if(!N) return;
+  try{
+    const ctx=N.AC, t=ctx.currentTime+0.01, r=(a,b)=>a+Math.random()*(b-a), D=0.85;
+    const vb=ctx.createGain(); vb.connect(N.vox);
+    // SIZZLE: steady high hiss + random crackle pops (a gate that flickers) through high-pass
+    const h=_fxNoiseSrc(N,t,D), hb=ctx.createBiquadFilter(), hg=ctx.createGain(); hb.type='bandpass'; hb.frequency.value=6000; hb.Q.value=0.8;
+    hg.gain.value=0.0001; _fxEnv(hg.gain,t,[[0,0.0001],[0.02,0.45],[0.3,0.3],[D,0.0001]]); h.connect(hb); hb.connect(hg); hg.connect(vb);
+    const c=_fxNoiseSrc(N,t,D), ch=ctx.createBiquadFilter(), cg=ctx.createGain(), ce=ctx.createGain(); ch.type='highpass'; ch.frequency.value=2500;
+    cg.gain.value=0; ce.gain.value=0.0001; _fxEnv(ce.gain,t,[[0,0.0001],[0.02,1.1],[0.4,0.7],[D,0.0001]]);
+    for(let i=0;i<22;i++){ const t0=t+i*0.034+r(0,0.01); cg.gain.setValueAtTime(r(0.25,1),t0); cg.gain.setValueAtTime(r(0,0.12),t0+0.012); }
+    c.connect(ch); ch.connect(cg); cg.connect(ce); ce.connect(vb);
+    // "AHH!": short sharp pained yell, pitch jumps up then sags, tight bright "ah" vowel
+    const p=r(0.95,1.06);
+    _fxVox(N,vb,t+0.03,{dur:0.5, f0:[[0,330*p],[0.05,570*p],[0.2,520*p],[0.5,370*p]], fm:[[900,780],[1300,1150],[2700,2500]], vib:[7,10], breath:0.18,
+      lp:[5200,2800], gain:[[0,0.0001],[0.015,1],[0.22,0.85],[0.5,0.0001]]});
+    _fxLive.fire.push({at:ctx.currentTime, end:t+D+0.06, bus:vb}); _fxCalls.fire++;
+  }catch(e){}
+}
+function playHitSfx(){
+  const N=_fxGate('hit'); if(!N) return;
+  try{
+    const ctx=N.AC, t=ctx.currentTime+0.01, r=(a,b)=>a+Math.random()*(b-a), p=r(0.94,1.08), D=0.4;
+    const vb=ctx.createGain(); vb.connect(N.vox);
+    // "UMPH": short low grunt, closed "uh" vowel, breathy, pitch sags
+    _fxVox(N,vb,t,{dur:0.26, f0:[[0,150*p],[0.04,165*p],[0.26,78*p]], fm:[[520,430],[1000,850],[2300,1900]], breath:0.35,
+      lp:[1800,700], gain:[[0,0.0001],[0.012,1],[0.1,0.7],[0.26,0.0001]]});
+    // soft body thump: sine drop + a muffled noise tap
+    const o=ctx.createOscillator(), og=ctx.createGain(); o.type='sine'; _fxEnv(o.frequency,t,[[0,135],[0.14,42]]);
+    og.gain.value=0.0001; _fxEnv(og.gain,t,[[0,0.0001],[0.004,0.9],[0.2,0.0001]]); o.connect(og); og.connect(vb); o.start(t); o.stop(t+D);
+    const n=_fxNoiseSrc(N,t,0.12), nf=ctx.createBiquadFilter(), ng=ctx.createGain(); nf.type='lowpass'; nf.frequency.value=700;
+    ng.gain.value=0.0001; _fxEnv(ng.gain,t,[[0,0.0001],[0.003,0.5],[0.08,0.0001]]); n.connect(nf); nf.connect(ng); ng.connect(vb);
+    // the breath pushed out of the chest right after the hit
+    const e=_fxNoiseSrc(N,t,D), eb=ctx.createBiquadFilter(), eg=ctx.createGain(); eb.type='bandpass'; eb.frequency.value=1400; eb.Q.value=0.8;
+    eg.gain.value=0.0001; _fxEnv(eg.gain,t,[[0.1,0.0001],[0.15,0.18],[0.38,0.0001]]); e.connect(eb); eb.connect(eg); eg.connect(vb);
+    _fxLive.hit.push({at:ctx.currentTime, end:t+D+0.06, bus:vb}); _fxCalls.hit++;
+  }catch(e){}
+}
+// fade out + forget every live fall/fire/hit voice (restart, state change, new level)
+function stopInjurySfx(){
+  if(!_fxN) return;
+  const now=_fxN.AC.currentTime;
+  for(const k of ['fall','fire','hit']){
+    for(const v of _fxLive[k]){ if(v.bus){ try{ v.bus.gain.cancelScheduledValues(now); v.bus.gain.setTargetAtTime(0,now,0.03); }catch(e){} } }
+    _fxLive[k]=[];
+  }
+}
+
 function toggleMute(){
   musicMuted=!musicMuted;
   if(_mNodes.out) _mNodes.out.gain.rampTo(musicMuted?0:0.55,0.08);
@@ -700,6 +800,7 @@ function drawMuteBtn(){
   ctx.restore();
 }
 function setState(s){
+  stopInjurySfx();   // fall / fire / hit voices never carry across a state change
   // MUSIC routing (states are mutually exclusive, so stop every engine then start the one for s):
   //   CUTSCENE  -> silence (no background bed)
   //   PLATFORMER-> Level 1 big-beat (v7)          — gameplay
@@ -4404,6 +4505,7 @@ const START_ALERT_MSG="ATTN: YOU HAVE ONE MINUTE TO FIND A STAIRWELL";
 // HUD sequence (frames @60fps): fade-in 0-10 | hold 10-80 | 3 blinks (14f each: 7 off, 7 on) 80-122 | minimize into the timer 122-170 (~2.8 s total)
 const SA_POP=10, SA_BLINK_AT=80, SA_BLINK_LEN=14, SA_MIN_AT=SA_BLINK_AT+3*SA_BLINK_LEN, SA_END=SA_MIN_AT+48;
 let startAlert=0;                   // frames since level start (counts up in updatePlatformer)
+let _holeFall=false;                // true once the fall yell fired for the current drop into a gap (reset on respawn / level start)
 let _tickSec=999;                   // last timer second a low-time tick fired for (reset on every level start)
 // Timer HUD box (2x the old 70x24), right edge parked well LEFT of the mute speaker (desktop speaker x W-34.., touch speaker x ~W-47..).
 const TIMER_BOX={w:140,h:44,y:8,gap:74};
@@ -4631,6 +4733,7 @@ function initLevel(){
   // CAR set-piece in the breather stretch (after the late ravine ~2840, before the final pile ~3600)
   car={ x:3020, depth:0.45, phase:'wait', t:0 };
   enteringSub=null;   // reset subway entry lead-in
+  stopInjurySfx(); _holeFall=false;
   levelTimer=LEVEL_TIME_FRAMES; timeFall=null; peteGlow=0; startAlert=0; _tickSec=999;   // countdown restarts at 1:00 + start alert replays with every fresh level start
   pete.y=depthY(0)-pete.h;camX=0;
   showBox("← → move   •   ↑ / ↓ move in depth   •   Space jump ravines   •   R punch · F kick   •   E pick up.");
@@ -4806,7 +4909,7 @@ function updatePlatformer(){
   if(timeFall){ peteGlow=0; if(++timeFall.t>=TIMEFALL_LEN+20) restartLevelAfterTimeout(); return; }
   if(peteGlow>0) peteGlow--;
   if(startAlert<SA_END) startAlert++;
-  if(!enteringSub && levelTimer>0 && --levelTimer<=0){ levelTimer=0; timeFall={t:0}; cancelAttack(); return; }
+  if(!enteringSub && levelTimer>0 && --levelTimer<=0){ levelTimer=0; timeFall={t:0}; cancelAttack(); playFallSfx(2.6); return; }   // time-out vertigo fall: same falling yell, faded to the ~2.8s spin (no tick runs after this: updatePlatformer returns early while timeFall)
   if(!enteringSub && levelTimer>0){ const ts=Math.ceil(levelTimer/60); if(ts!==_tickSec){ _tickSec=ts; if(ts<=14) playTickSfx(ts%2===0); } }   // tick/tock once per second below 0:15
   // keep the rig/input clock current in the UPDATE pass (input resolution runs here, not in draw)
   perf2 = (typeof performance!=='undefined') ? performance.now() : (perf2+16);
@@ -4908,13 +5011,15 @@ function updatePlatformer(){
     if(wasGrounded && pete.vy>=0){ pete.y=groundY-pete.h; pete.vy=0; pete.onGround=true; }
     else if(pete.vy>=0 && feet>=groundY && feet<=groundY+30){ pete.y=groundY-pete.h; pete.vy=0; pete.onGround=true; }
   }
+  // FALL SFX: the moment he drops past the lane surface over a gap (ravine / collapsed crumble) with no way to be caught, once per fall
+  if(!overRoad && !_holeFall && !pete.onGround && pete.vy>2 && footY(pete)>groundY+30){ _holeFall=true; playFallSfx(1.8); }
   if(pete.x<-40)pete.x=-40;
   // fell into a ravine -> respawn. Before the halfway waypoint: back to level start.
   // After grabbing the jacket (checkpoint): back to the jacket waypoint.
   if(pete.y>PLAYFIELD_BOTTOM+40){
     const respawnX = (checkpointX!=null) ? checkpointX : 60;
     pete.depth=0; pete.vdepth=0;                      // always respawn at the near edge
-    pete.x=respawnX; pete.y=depthY(0)-pete.h; pete.vx=pete.vy=0; pete.onGround=true;
+    pete.x=respawnX; pete.y=depthY(0)-pete.h; pete.vx=pete.vy=0; pete.onGround=true; _holeFall=false;   // (fall yell keeps fading out as he drops away)
     for(const c of crumbles){ c.state='solid'; c.t=0; }   // death: every rockfall trap resets to un-triggered
     peteGlow=0; cancelAttack();
   }
@@ -4959,7 +5064,7 @@ function updatePlatformer(){
     const cleared = feetY <= flameTop;                     // feet above the flame => jumped over it
     if(pete.hurt<=0 && !cleared && hzHit(f)){
       pete.vx=-6;pete.vy=-7;pete.face='left';pete.hurt=70;   // knockback impulse (~1.2s flicker)
-      showBox(OW_MSG);
+      showBox(OW_MSG); playFireHurtSfx();   // sizzle + "AHH!"
     }
   }
   // DEBRIS FIELDS -> collapsed-city chunks that BLOCK + BURN. Overlap in x+depth = knockback,
@@ -4969,7 +5074,7 @@ function updatePlatformer(){
       if(pete.x < d.x){ pete.x=d.x-pete.w; pete.vx=-5; pete.face='left'; }
       else            { pete.x=d.x+d.w;   pete.vx=5;  pete.face='right'; }
       pete.vy=-6; pete.hurt=70;
-      showBox(OW_MSG);
+      showBox(OW_MSG); playHitSfx();   // "UMPH!" (solid debris collision)
     }
   }
   // Advance the walk cycle while a MOVE KEY is held — same priority as petePose (R>L>W>S),
@@ -6904,7 +7009,7 @@ const replayBtn={x:W/2-125,y:369,w:250,h:34};
 // RESTART button, top-left of the end screen (the mute icon is top-right). Back to a fresh TITLE without reloading the page.
 const restartBtn={x:14,y:12,w:150,h:34};
 function restartGame(){
-  box=null; choice=null; puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false; enteringSub=null; timeFall=null; levelFadeIn=0;
+  box=null; choice=null; puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false; enteringSub=null; timeFall=null; levelFadeIn=0; stopInjurySfx(); _holeFall=false;
   startAlert=0; _tickSec=999; levelTimer=LEVEL_TIME_FRAMES; checkpointX=null; beat2Shown=false; descProg=0; descHold=0; stWorn.boxers=true; stOpen=null; stFig=null;
   cutPhase='intro'; cut=0; introStep=0; yellCount=0; choiceRects=[];
   for(const k in keys) keys[k]=false; releaseAtkKeys();
