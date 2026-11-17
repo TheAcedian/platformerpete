@@ -3824,6 +3824,24 @@ function drawPete(cx,feetY,s,o={}){
     if(gk>1.3){ ctx.globalAlpha=Math.min(1,(gk-1)*1.4); gooFoot(SKg.footNear,Math.min(gk-0.3,4),gk>2); }   // from the 2nd kill the other shoe is stuck too
     ctx.globalAlpha=1;
   }
+  if(o.footBlood>0.01){                                  // Level 2 fight 2: red gnome blood, layered ON TOP of the green roach goo. Level 1 = far foot, 2 = both feet, 3 = shins, 4 = knees + drips
+    const SKb=solve(pose), bk=o.footBlood, bBlob=(x,y,r)=>{ ctx.fillStyle='#5a0a10'; ctx.beginPath(); ctx.arc(x,y,r+0.8,0,7); ctx.fill(); ctx.fillStyle='#c4161c'; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); };
+    const bFoot=(f,lvl)=>{
+      const sp=[[f.ankle.x+4,f.ankle.y-4,3.2],[f.ball.x+1,f.ball.y-3,3.4],[f.toe.x-2,f.toe.y-4,2.6],[f.ankle.x-2,f.ankle.y-8,2.4],[f.ball.x-4,f.ball.y,2.1],[f.ankle.x+1,f.ankle.y-1,2.2]];
+      if(lvl>1.5) sp.push([f.ankle.x-4,f.ankle.y-3,2.0],[f.ball.x+3,f.ball.y-6,1.8]);
+      for(const p of sp) bBlob(p[0],p[1],p[2]);
+    };
+    const bLeg=(L,lvl,knees)=>{                          // blobs along the shin (joint -> end), and the knee at level 4
+      const n=Math.min(6,Math.round((lvl-2)*3)+2);
+      for(let i=0;i<n;i++){ const t=0.15+0.8*i/Math.max(1,n-1), x=L.end.x+(L.joint.x-L.end.x)*t, y=L.end.y+(L.joint.y-L.end.y)*t; bBlob(x+((i%2)?1.6:-1.2),y,2.1+(i%3)*0.4); }
+      if(knees){ bBlob(L.joint.x,L.joint.y,3.2); bBlob(L.joint.x+2,L.joint.y-5,2.4); const dy=((perf2*0.004)%1)*3; bBlob(L.joint.x-1,L.joint.y+4+dy,1.3); }
+    };
+    ctx.globalAlpha=Math.min(1,bk*1.6);
+    bFoot(SKb.footFar,Math.min(bk,4));
+    if(bk>1.3){ ctx.globalAlpha=Math.min(1,(bk-1)*1.4); bFoot(SKb.footNear,Math.min(bk,4)); }
+    if(bk>2.3){ ctx.globalAlpha=Math.min(1,(bk-2)*1.4); bLeg(SKb.legFar,bk,bk>3.3); bLeg(SKb.legNear,bk,bk>3.3); }
+    ctx.globalAlpha=1;
+  }
   ctx.restore();
 }
 // Exact screen point of the ported rig's NEAR shoulder (where Biscuit perches). Recomputed from
@@ -4722,7 +4740,9 @@ const LEVEL_DEFS={
     ],
     hint:{dist:240,frames:300},                          // Pete within this floor distance of a live roach -> "Stomp the roaches!" bubble (once)
     dialogs:{                                            // verbatim from the demo (CLEAR is the demo's own placeholder)
-      knock:[ {who:'PETE',text:'KNOCK KNOCK, LET ME IN!'}, {who:'DOOR VOICE',text:'What the hell are you doing here?'}, {who:'DOOR VOICE',text:"I can't let you in with mobs around..."} ],
+      refuse:[ {who:'PETE',text:'LET ME IN DAMNIT!'}, {who:'DOOR VOICE',text:"Too late!, Can't open the door with mobs outside",sfx:'hiss'} ],   // Michael's lines (roaches or gnomes outside): refusal + the cat hiss
+      gone:[ {who:'PETE',text:'Knock knock again. The mobs are gone!'}, {who:'DOOR VOICE',text:'What are you doing here?!'} ],   // roaches dead: ends in the murder tractor event
+
       clear:[ {who:'PETE',text:'Knock knock again. The mobs are gone!'}, {who:'DOOR VOICE',text:'Okay, the coast is clear. Come in!'} ]
     },
     music:'level2'
@@ -4745,6 +4765,571 @@ const ATTACK_REACH={
   kick0: {d:40,R:130,dmg:2}, kick1: {d:45,R:150,dmg:2}, kick2: {d:36,R:170,dmg:3}
 };
 const ATTACK_ZWEIGHT=0.7;
+// =====================================================================
+// ENEMY ART (Level 2 fight 2): the approved gnome + murder tractor pixel art, ported VERBATIM from Characters/Enemies/enemies_pixelart.html
+// (ENEMY_ART + drawGnome / drawTractorFlames / drawTractorSmoke / drawMurderTractorSide / drawMurderTractor). Only the integration glue
+// (the ea* helpers further down) and the 4th side-view passenger seat (trowel) are new.
+// =====================================================================
+var ENEMY_ART = (function () {
+  // one char per colour. Tones are in light -> dark triples: red abc, blue def, purple ghi, green jkl
+  var PAL = {
+    K: '#2a1a1c',                                   // outline
+    a: '#e8665a', b: '#c0392f', c: '#82222a',       // red
+    d: '#6aa0e6', e: '#3d68b8', f: '#264484',       // blue
+    g: '#ad7ee0', h: '#7a4cb0', i: '#4e2d7c',       // purple
+    j: '#6cc664', k: '#3f9244', l: '#26623a',       // green
+    w: '#ffffff', x: '#dbe0ec', z: '#a9b0c8',       // white (beard)
+    s: '#f4bfa6', S: '#d8917f', n: '#e8727c',       // skin, shade, nose
+    t: '#9a6438', u: '#6c4020', v: '#44261a',       // brown
+    y: '#f7d85a', Y: '#cc9a2c', Q: '#7e5218',       // gold / brass
+    m: '#d6dde6', M: '#929eae', N: '#5e6878',       // steel
+    D: '#d9ceb2',                                   // sandy ground shadow
+    I: '#555563', J: '#363642', L: '#1f1f29',       // iron
+    o: '#fff27a', p: '#ffb02e', q: '#ff6a1c',       // flame (core, mid, outer); orange hat = ypq
+    r: '#a4a4b0', R: '#74748a',                     // smoke; grey coat = rRI
+    E: '#ff3a30', B: '#2a1c4a'                      // red glow, night sky
+  };
+  var VARIANTS = {
+    trowel: { hat: 'abc', coat: 'def', tool: 'trowel' },
+    shovel: { hat: 'abc', coat: 'def', tool: 'shovel' },
+    knife:  { hat: 'jkl', coat: 'ghi', tool: 'knife', mirror: true },
+    fork:   { hat: 'ypq', coat: 'rRI', tool: 'fork' },
+    driver: { hat: 'def', coat: 'def', tool: null, bust: true }
+  };
+
+  function buf(w, h) { var a = []; for (var y = 0; y < h; y++) a.push(new Array(w).fill(null)); return { w: w, h: h, a: a }; }
+  function set(b, x, y, c) { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < b.w && y < b.h) b.a[y][x] = c; }
+  function get(b, x, y) { return (x >= 0 && y >= 0 && x < b.w && y < b.h) ? b.a[y][x] : null; }
+  // 3-tone shade index, lit from top-left, checkerboard dither where tones meet
+  function sh(u, v, x, y) {
+    var s = u * 0.75 + v * 0.35, d = (x + y) & 1;
+    if (Math.abs(s - 0.33) < 0.07) return d ? 0 : 1;
+    if (Math.abs(s - 0.72) < 0.07) return d ? 1 : 2;
+    return s < 0.33 ? 0 : (s < 0.72 ? 1 : 2);
+  }
+  function span(b, y, x0, x1, tones, v) { // horizontal span shaded left->right
+    for (var x = x0; x <= x1; x++) set(b, x, y, tones[sh((x - x0 + 0.5) / (x1 - x0 + 1), v, x, y)]);
+  }
+  function box(b, x0, y0, x1, y1, tones) {
+    for (var y = y0; y <= y1; y++) span(b, y, x0, x1, tones, (y - y0 + 0.5) / (y1 - y0 + 1));
+  }
+  function disc(b, cx, cy, r, fn) {
+    for (var y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++)
+      for (var x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++) {
+        var dx = x + 0.5 - cx, dy = y + 0.5 - cy;
+        if (dx * dx + dy * dy <= r * r) set(b, x, y, fn(dx / r, dy / r, x, y));
+      }
+  }
+  function outline(b, col) {
+    var add = [];
+    for (var y = 0; y < b.h; y++) for (var x = 0; x < b.w; x++) if (!b.a[y][x]) {
+      if (get(b, x - 1, y) || get(b, x + 1, y) || get(b, x, y - 1) || get(b, x, y + 1)) add.push([x, y]);
+    }
+    for (var i = 0; i < add.length; i++) b.a[add[i][1]][add[i][0]] = col;
+  }
+  function blit(ctx, b, x, y, s) {
+    ctx.imageSmoothingEnabled = false;
+    for (var j = 0; j < b.h; j++) for (var i = 0; i < b.w; i++) {
+      var c = b.a[j][i]; if (!c) continue;
+      ctx.fillStyle = PAL[c]; ctx.fillRect(x + i * s, y + j * s, s, s);
+    }
+  }
+  function paste(dst, src, ox, oy) {
+    for (var j = 0; j < src.h; j++) for (var i = 0; i < src.w; i++) if (src.a[j][i]) set(dst, ox + i, oy + j, src.a[j][i]);
+  }
+
+  // ------------------------------------------------------------ GNOME (34 x 40 grid)
+  function buildGnome(o) {
+    var W = 34, H = 40, b = buf(W, H), cx = 17, hat = o.hat, coat = o.coat, x, y, dx, i;
+    var tc = o.tool === 'fork' ? 5 : 4; // tool centre column (viewer's left)
+    // boots
+    if (!o.bust) {
+      [[11, 16], [18, 23]].forEach(function (r) {
+        for (y = 32; y <= 36; y++) { var a0 = r[0] - (y === 36 ? 1 : 0), a1 = r[1]; span(b, y, a0, a1, 'tuv', (y - 32) / 5 * 0.9 + 0.1); }
+        for (x = r[0]; x <= r[1]; x++) set(b, x, 36, 'v');
+        set(b, r[0] + 1, 33, 't'); set(b, r[0] + 2, 33, 't'); // soft toe highlight
+      });
+    }
+    // coat body + skirt
+    var bodyBottom = o.bust ? 27 : 31;
+    for (y = 21; y <= bodyBottom; y++) {
+      var hw = y === 21 ? 7 : (y >= 31 ? 8.5 : 8);
+      span(b, y, Math.round(cx - hw), Math.round(cx + hw) - 1, coat, (y - 21) / 10);
+    }
+    if (!o.bust) for (y = 24; y <= 28; y += 2) { set(b, cx - 6, y, coat[2]); set(b, cx + 5, y + 1, coat[2]); } // soft coat folds
+    // sleeves
+    for (y = 22; y <= 27; y++) { // viewer's left arm raised to the tool
+      var l0 = Math.round(9 - (y - 22) * 0.7);
+      span(b, y, l0, l0 + 3, coat, 0.15 + (y - 22) / 14);
+      set(b, l0 + 3, y, coat[2]); // soft inner sleeve line
+    }
+    if (!o.bust) {
+      for (y = 22; y <= 29; y++) {
+        span(b, y, 24, 27, coat, 0.3 + (y - 22) / 14);
+        set(b, 24, y, coat[2]);
+      }
+      for (x = 24; x <= 27; x++) set(b, x, 28, 'x'), set(b, x, 29, 'z');   // cuff
+      box(b, 25, 30, 27, 31, 'sSS');                                        // hand
+      // belt + buckle
+      for (x = cx - 8; x <= cx + 7; x++) { set(b, x, 29, 't'); set(b, x, 30, 'u'); }
+      box(b, 16, 29, 18, 30, 'yyy'); set(b, 17, 29, 'Y'); set(b, 17, 30, 'Y');
+      for (x = 11; x <= 15; x++) if ((x & 1) === 0) set(b, x, 30, 'v');
+      // left hand around the tool handle
+      box(b, 3, 26, 7, 29, 'sss'); for (x = 3; x <= 7; x++) set(b, x, 29, 'S');
+      for (y = 26; y <= 29; y++) set(b, 7, y, 'S');
+      for (x = 6; x <= 9; x++) { set(b, x, 25, 'x'); set(b, x, 26, 'z'); }  // left sleeve cuff
+    }
+    // tool
+    if (o.tool === 'trowel') {
+      // pointed leaf-shaped blade: widest around y=17, tapering to the neck, ridge down the middle
+      var top = 9, bot = 23;
+      for (y = top; y <= bot; y++) {
+        var t = (y - top) / (bot - top);
+        var hl = t < 0.62 ? 3.2 * Math.pow(t / 0.62, 0.75) : 3.2 * (1 - (t - 0.62) / 0.38 * 0.8);
+        hl = Math.max(hl, 1.0);
+        var x0 = Math.round(tc - hl), x1 = Math.round(tc + hl) - 1;
+        for (x = x0; x <= x1; x++) {
+          var cc;
+          if (y > top + 1 && (x === x0 || x === x1)) cc = (x === x0) ? 'm' : 'M';  // lighter edge, left lit
+          else if (x === tc && y >= top + 3) cc = 'N';                             // centre ridge
+          else if (x === tc - 1 && y >= top + 3) cc = 'm';                         // ridge highlight
+          else if (x < tc) cc = ((x + y) & 1) ? 'M' : 'm';
+          else cc = ((x + y) & 1) ? 'M' : 'N';
+          set(b, x, y, cc);
+        }
+      }
+      set(b, tc - 1, top, 'w'); set(b, tc, top + 1, 'm');
+      for (x = tc - 1; x <= tc + 1; x++) set(b, x, 25, x === tc - 1 ? 'M' : 'N');   // ferrule
+      for (y = 26; y <= 31; y++) { set(b, tc - 1, y, 't'); set(b, tc, y, y & 1 ? 'u' : 't'); set(b, tc + 1, y, 'v'); }
+    } else if (o.tool === 'shovel') {
+      for (y = 3; y <= 12; y++) { var h2 = y === 12 ? 1.3 : Math.min(2.9, 1 + (y - 3) * 0.7); span(b, y, Math.round(tc - h2), Math.round(tc + h2) - 1, 'mMN', 0.0); }
+      for (y = 4; y <= 11; y++) set(b, tc, y, 'N');
+      for (y = 13; y <= 31; y++) span(b, y, tc - 1, tc, 'tu', 0.15);
+    } else if (o.tool === 'knife') {
+      for (y = 18; y <= 26; y++) { var h3 = Math.min(1.9, 0.3 + (y - 18) * 0.5); span(b, y, Math.round(tc - h3), Math.round(tc + h3) - 1, 'mMN', 0.0); }
+      for (y = 19; y <= 26; y++) set(b, tc, y, 'N');
+      for (x = tc - 2; x <= tc + 2; x++) set(b, x, 27, 'Y');
+      for (y = 28; y <= 31; y++) span(b, y, tc - 1, tc + 1, 'tuv', 0.1);
+    } else if (o.tool === 'fork') {
+      // three-pronged hand cultivator: tines curve inward at the tips, steel head, wooden handle
+      var claw = [-2, -2, -2, -3, -3, -3, -4, -4, -4, -4, -4, -3, -3];            // outer tines bow out, then hook in at the tips (y = 9..21)
+      for (y = 9; y <= 21; y++) {
+        set(b, tc, y, (y & 1) ? 'M' : 'm');                                      // centre tine
+        set(b, tc + claw[y - 9], y, 'm'); set(b, tc - claw[y - 9], y, 'N');     // outer tines
+      }
+      set(b, tc, 8, 'w'); set(b, tc + claw[0], 9, 'w');
+      for (x = tc - 3; x <= tc + 3; x++) { set(b, x, 22, x < tc ? 'm' : 'M'); set(b, x, 23, x < tc ? 'M' : 'N'); }
+      for (x = tc - 1; x <= tc + 1; x++) set(b, x, 24, 'N');
+      for (y = 25; y <= 31; y++) { set(b, tc - 1, y, 't'); set(b, tc, y, y & 1 ? 'u' : 't'); set(b, tc + 1, y, 'v'); }
+    }
+    // face (skin under the hat brim)
+    for (y = 14; y <= 17; y++) for (dx = -4; dx <= 3; dx++) set(b, cx + dx, y, y === 14 ? 'S' : 's');
+    set(b, cx - 2, 15, 'K'); set(b, cx + 2, 15, 'K');
+    // beard
+    for (y = 15; y <= 28; y++) {
+      var bw = y <= 19 ? 6.5 : Math.max(0.6, 6.5 - (y - 19) * 0.7);
+      for (x = Math.ceil(cx - bw); x <= Math.floor(cx + bw - 1); x++) {
+        dx = x - cx;
+        if (y <= 16 && dx >= -3 && dx <= 3) continue;
+        var u = (x - (cx - bw)) / (2 * bw), v = (y - 15) / 14;
+        set(b, x, y, 'wxz'[sh(u * 0.8, v * 0.9, x, y)]);
+      }
+    }
+    // moustache + soft strand lines
+    for (y = 17; y <= 18; y++) for (dx = -6 + (y - 17); dx <= 5 - (y - 17); dx++) set(b, cx + dx, y, (dx < 0 ? 'w' : 'x'));
+    for (dx = -5; dx <= 4; dx++) if (Math.abs(dx + 0.5) >= 1.5 && Math.abs(dx + 0.5) <= 4.5) set(b, cx + dx, 19, 'z');
+    [[-5, 20, 23], [-3, 20, 26], [-1, 21, 28], [1, 20, 27], [3, 20, 25], [4, 20, 22]].forEach(function (s) {
+      for (y = s[1]; y <= s[2]; y++) { var px = cx + s[0]; if (get(b, px, y) && ((y + s[0]) & 1 || y === s[2])) set(b, px, y, s[0] < 0 ? 'x' : 'z'); }
+    });
+    // nose
+    for (y = 16; y <= 17; y++) for (dx = -1; dx <= 1; dx++) set(b, cx + dx, y, 'n');
+    set(b, cx - 1, 16, 's'); set(b, cx + 1, 17, 'S');
+    // hat: leaning cone, tip bends to the viewer's right
+    for (y = 0; y <= 13; y++) {
+      var tt = (13 - y) / 13, hw2 = 0.6 + y * 0.62, c = 17.5 + 7.5 * tt * tt;
+      var xa = Math.round(c - hw2), xb = Math.max(xa, Math.round(c + hw2) - 1);
+      var fold = xa + Math.round(0.66 * (xb - xa));
+      for (x = xa; x <= xb; x++) {
+        var uu = (x - xa + 0.5) / (xb - xa + 1), idx = sh(uu, y / 13, x, y);
+        if (y >= 4 && y <= 10 && x === fold && (y & 1)) idx = Math.min(2, idx + 1);   // soft fold line
+        if (y === 11) idx = (x + y) & 1 ? 0 : idx;                                    // cuff top highlight
+        if (y === 12) idx = 2; else if (y === 13) idx = idx === 2 ? 1 : 0;
+        set(b, x, y, hat[idx]);
+      }
+    }
+    outline(b, 'K');
+    if (o.mirror) for (y = 0; y < H; y++) b.a[y].reverse();
+    if (!o.bust && !o.noShadow) { // ground shadow in the empty cells
+      for (y = 37; y <= 39; y++) { var sw = y === 37 ? 13 : (y === 38 ? 11 : 7); for (x = cx - sw; x <= cx + sw; x++) if (!get(b, x, y)) set(b, x, y, o.shadow || 'D'); }
+    }
+    return b;
+  }
+
+  // ------------------------------------------------------------ TRACTOR (190 x 124 grid)
+  // side-on spoked wheel (used by the SIDE view). rot = rotation in radians (for animation).
+  function wheel(b, cx, cy, R, sp, rot) {
+    var k = R / 34, x, y, TP = 2 * Math.PI;
+    for (y = Math.floor(cy - R); y <= Math.ceil(cy + R); y++) for (x = Math.floor(cx - R); x <= Math.ceil(cx + R); x++) {
+      var dx = x + 0.5 - cx, dy = y + 0.5 - cy, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > R) continue;
+      var lit = (dx + dy) / (R * 1.4), ang = (((Math.atan2(dy, dx) + Math.PI + (rot || 0)) % TP) + TP) % TP, c;
+      if (d > R * 0.79) { // tyre
+        var notch = Math.floor(ang / (2 * Math.PI) * sp * 5) % 2;
+        c = (d > R - 1.3 && lit < 0.1) ? 'I' : ((d > R * 0.9 && notch === 0) ? 'L' : 'J');
+      } else if (d > R * 0.62) { // yellow rim
+        c = (d > R * 0.76 || d < R * 0.66) ? 'Q' : (lit < -0.2 ? 'y' : (lit > 0.35 ? 'Q' : 'Y'));
+      } else {
+        var seg = 2 * Math.PI / sp, da = ((ang % seg) + seg) % seg - seg / 2, perp = Math.abs(d * Math.sin(da));
+        if (d < R * 0.2) c = d < R * 0.08 ? 'Q' : (lit < 0 ? 'y' : 'Y');
+        else if (perp < 1.2 * k + 0.4) c = lit < 0 ? 'y' : 'Y';
+        else c = 'L';
+      }
+      set(b, x, y, c);
+    }
+  }
+  // head-on tyre: seen tread-first as a tall rubber slab with chevron lugs and a sliver of yellow rim on the outer side
+  function wheelFront(b, x0, x1, y0, y1, outerLeft) {
+    var w = x1 - x0 + 1, cx = (x0 + x1) / 2, rimW = Math.max(3, Math.round(w * 0.2)), x, y, i;
+    var rimCols = outerLeft ? ['y', 'Y', 'Q', 'Q'] : ['Y', 'Y', 'Q', 'Q'];
+    for (y = y0; y <= y1; y++) {
+      var cut = Math.max(0, 2 - (y - y0), 2 - (y1 - y));
+      for (x = x0 + cut; x <= x1 - cut; x++) {
+        var oi = outerLeft ? x - x0 : x1 - x, c;                      // distance from the outer edge
+        if (oi < rimW && y >= y0 + 4 && y <= y1 - 4 && !(oi === 0 && (y <= y0 + 5 || y >= y1 - 5))) {
+          c = rimCols[Math.min(oi, 3)];
+          if (oi === 1 && ((y - y0) % 7 === 4)) c = 'L';                // bolt heads
+        } else {
+          var ph = (y - y0 + Math.round(Math.abs(x - cx) * 0.9)) % 5;   // herringbone lugs
+          c = ph === 0 ? 'I' : (ph === 1 ? 'J' : 'L');
+          if (y === y0 + (cut ? 0 : 2)) c = 'I';
+        }
+        set(b, x, y, c);
+      }
+    }
+  }
+  function brass(b, x0, x1, y0, y1) { // horizontal brass pipe, light top, dark bottom
+    for (var y = y0; y <= y1; y++) for (var x = x0; x <= x1; x++) set(b, x, y, y === y0 ? 'y' : (y === y1 ? 'Q' : 'Y'));
+  }
+  function tooth(b, cx, y0, w, h, dir) {
+    for (var r = 0; r < h; r++) {
+      var yy = y0 + dir * r, hw = w / 2 * (1 - r / h), xs = Math.round(cx - hw), xe = Math.max(xs, Math.round(cx + hw) - 1);
+      for (var x = xs; x <= xe; x++) {
+        var edge = (x === xs || x === xe || r === h - 1);
+        set(b, x, yy, edge ? 'L' : (x < cx ? 'j' : 'k'));
+      }
+    }
+  }
+  function buildTractor(driver) {
+    var W = 190, H = 124, C = 95, b = buf(W, H), x, y, i;
+    // big rear tyres (head-on, behind/beside the body) with green mudguards and an axle to the body
+    box(b, 34, 92, 52, 99, 'IJL'); box(b, 138, 92, 156, 99, 'IJL');
+    wheelFront(b, 18, 35, 64, 123, true); wheelFront(b, 154, 171, 64, 123, false);
+    box(b, 15, 60, 38, 66, 'jkl'); box(b, 151, 60, 174, 66, 'jkl');
+    for (x = 17; x <= 36; x++) { set(b, x, 66, 'l'); set(b, x + 136, 66, 'l'); }
+    // brass exhaust stacks with bands, rivets, gauge
+    [47, 135].forEach(function (s) {
+      box(b, s, 4, s + 8, 46, 'yYQ');
+      for (x = s; x <= s + 8; x++) { set(b, x, 12, 'Q'); set(b, x, 13, 'Y'); set(b, x, 30, 'Q'); set(b, x, 31, 'Y'); }
+      for (x = s + 1; x <= s + 7; x += 3) { set(b, x, 12, 'y'); set(b, x, 30, 'y'); }
+      box(b, s - 1, 0, s + 9, 3, 'yYY'); for (x = s - 1; x <= s + 9; x++) set(b, x, 3, 'Q');
+      box(b, s - 1, 40, s + 9, 46, 'yYQ');
+      for (y = 15; y <= 28; y++) set(b, s + 2, y, 'y');
+      disc(b, s + 4.5, 21, 3.8, function (ddx, ddy) { return (ddx * ddx + ddy * ddy > 0.5) ? 'Y' : 'x'; });
+      set(b, s + 4, 20, 'K'); set(b, s + 5, 21, 'E');
+    });
+    // brass frame behind the driver: rails + posts, pipes to the stacks
+    brass(b, 56, 134, 17, 19); brass(b, 56, 134, 28, 29);
+    for (y = 17; y <= 46; y++) { box(b, 60, y, 62, y, 'yYQ'); box(b, 128, y, 130, y, 'yYQ'); }
+    brass(b, 56, 76, 34, 36); brass(b, 114, 134, 34, 36);
+    [66, 124].forEach(function (vx) { disc(b, vx, 35, 3.6, function (ddx, ddy) { return (ddx * ddx + ddy * ddy < 0.25) ? 'L' : 'E'; }); });
+    // driver gnome (blue hat, blue coat) behind the wheel
+    if (driver) paste(b, buildGnome(VARIANTS.driver), C - 17, 8);
+    // green body shell
+    for (y = 59; y <= 117; y++) {
+      span(b, y, 46, 144, 'jkl', (y - 59) / 58 * 0.6);
+      set(b, 46, y, 'l'); set(b, 144, y, 'l'); set(b, 47, y, 'j');
+    }
+    // crenellated / spiked green panels along the top
+    for (var sp = 50; sp < 140; sp += 10) for (y = 44; y <= 55; y++) {
+      var hh = (y - 44 + 1) / 12 * 5, xa = Math.round(sp + 5 - hh), xb = Math.max(xa, Math.round(sp + 5 + hh) - 1);
+      for (x = xa; x <= xb; x++) set(b, x, y, x === xa ? 'j' : (x >= xb - 1 ? 'l' : 'k'));
+    }
+    // iron brow band with rivets
+    for (x = 46; x <= 144; x++) { set(b, x, 55, 'I'); set(b, x, 56, 'J'); set(b, x, 57, 'J'); set(b, x, 58, 'L'); }
+    for (x = 50; x <= 142; x += 8) set(b, x, 56, 'N');
+    // glowing red eyes, angled dark brow plates
+    [61, 129].forEach(function (ex, idx) {
+      disc(b, ex, 70, 9, function () { return 'L'; });
+      disc(b, ex, 70, 7.4, function (dx, dy) {
+        var d = Math.sqrt(dx * dx + dy * dy);
+        return d < 0.33 ? 'o' : (d < 0.62 ? 'p' : (d < 0.85 ? 'q' : 'E'));
+      });
+      set(b, ex - 3, 67, 'w'); set(b, ex - 2, 66, 'w');
+      for (x = ex - 10; x <= ex + 10; x++) {
+        var top = 59 + Math.round((idx === 0 ? (x - (ex - 10)) : ((ex + 10) - x)) * 0.3);
+        for (y = top; y <= top + 4; y++) set(b, x, y, y === top ? 'I' : (y === top + 4 ? 'L' : 'J'));
+      }
+    });
+    // skull badge: brass medallion as the nose / hood emblem
+    disc(b, C + 0.5, 70, 9.5, function (dx, dy) { return (dx * dx + dy * dy > 0.7) ? (dx + dy < 0 ? 'y' : 'Y') : 'J'; });
+    for (y = 64; y <= 74; y++) {
+      var sw = y === 64 ? 2 : (y <= 69 ? 4 : (y === 70 ? 3 : 2));
+      for (x = C - sw; x <= C + sw; x++) set(b, x, y, (x > C && y > 68) ? 'x' : 'w');
+    }
+    [[C - 3, 67], [C - 2, 67], [C - 3, 68], [C - 2, 68], [C + 2, 67], [C + 3, 67], [C + 2, 68], [C + 3, 68], [C, 70], [C - 1, 70]].forEach(function (p) { set(b, p[0], p[1], 'K'); });
+    for (x = C - 2; x <= C + 2; x++) set(b, x, 73, (x & 1) ? 'K' : 'w');
+    // side panels: vents, gauges, rivets
+    [[49, 61], [129, 141]].forEach(function (p) {
+      for (y = 82; y <= 89; y++) for (x = p[0]; x <= p[1]; x++) set(b, x, y, ((y - 82) % 3 === 2) ? 'L' : (y === 82 ? 'I' : 'J'));
+    });
+    [55, 135].forEach(function (gx) {
+      disc(b, gx, 100, 6.5, function (dx, dy) { return (dx * dx + dy * dy > 0.55) ? (dx + dy < 0 ? 'y' : 'Y') : 'x'; });
+      set(b, gx, 99, 'K'); set(b, gx + 1, 98, 'K'); set(b, gx - 1, 100, 'E');
+      for (x = gx - 6; x <= gx + 6; x += 4) set(b, x, 108, 'N');
+    });
+    // MOUTH: green grille box, orange/yellow glow, jagged teeth
+    for (y = 80; y <= 110; y++) for (x = 65; x <= 125; x++) {
+      var edge = (y <= 81 || y >= 109 || x <= 66 || x >= 124);
+      set(b, x, y, edge ? ((y <= 81 || x <= 66) ? 'j' : 'l') : 'L');
+    }
+    for (y = 83; y <= 107; y++) for (x = 68; x <= 122; x++) {
+      var gx2 = Math.abs(x - 95) / 28, gy2 = Math.abs(y - 95) / 13, g = 1 - Math.sqrt(gx2 * gx2 * 0.6 + gy2 * gy2);
+      set(b, x, y, g > 0.62 ? 'o' : (g > 0.38 ? 'p' : 'q'));
+    }
+    for (i = 0; i < 8; i++) tooth(b, 68 + (i + 0.5) * 55 / 8, 83, 55 / 8, 10, 1);
+    for (i = 0; i < 7; i++) tooth(b, 68 + (i + 1) * 55 / 8, 107, 55 / 8, 9, -1);
+    // brass bumper with rivets
+    for (y = 112; y <= 117; y++) for (x = 44; x <= 146; x++) set(b, x, y, y === 112 ? 'y' : (y <= 115 ? 'Y' : (y === 116 ? 'Q' : 'L')));
+    for (x = 50; x <= 142; x += 10) { set(b, x, 114, 'y'); set(b, x + 1, 115, 'Q'); }
+    // smaller front tyres, lower and closer in under the face
+    wheelFront(b, 38, 49, 90, 123, true); wheelFront(b, 140, 151, 90, 123, false);
+    // steering wheel (brass ring) with the driver's hands
+    if (driver) { box(b, 83, 35, 85, 37, 'sSS'); box(b, 105, 35, 107, 37, 'sSS'); }
+    disc(b, C + 0.5, 42, 10, function (dx, dy) { return (dx * dx + dy * dy > 0.55) ? (dx + dy < -0.2 ? 'y' : (dx + dy > 0.7 ? 'Q' : 'Y')) : 'J'; });
+    for (i = -7; i <= 7; i++) { set(b, C + i, 42, 'Y'); set(b, C, 42 + i, 'Y'); }
+    disc(b, C + 0.5, 42, 2.2, function () { return 'y'; }); set(b, C, 42, 'Q');
+    outline(b, 'K');
+    return b;
+  }
+
+  function buildFlame(frame) {
+    var b = buf(11, 14), y, x;
+    for (y = 0; y < 14; y++) {
+      var hw = y < 9 ? 4.2 * Math.sqrt((y + 0.5) / 9.5) : 4.2 * Math.sqrt(Math.max(0, (13.8 - y) / 4.8));
+      var sway = Math.round(Math.sin(frame * 0.9 + y * 0.35) * 1.6 * (1 - y / 13)), c = 5 + sway;
+      for (x = Math.round(c - hw); x <= Math.round(c + hw) - 1; x++) {
+        var d = Math.abs(x + 0.5 - c) / Math.max(hw, 0.5);
+        set(b, x, y, (d < 0.35 && y > 6) ? 'o' : (d < 0.7 && y > 3) ? 'p' : 'q');
+      }
+    }
+    return b;
+  }
+  function buildSmoke(frame) {
+    var b = buf(190, 36);
+    [51, 139].forEach(function (sx0, sIdx) {
+      for (var k = 0; k < 4; k++) {
+        var age = ((frame * 0.04) + k / 4) % 1, r = 1.8 + age * 3.4 + (k % 2) * 0.6;
+        var cx = sx0 + age * 8 + (k % 2 ? 2 : -1), cy = 33 - age * 31;
+        disc(b, cx, cy, r, function (dx, dy, px, py) {
+          var s = (dx + dy) * 0.5 + 0.5, d = (px + py) & 1;
+          return (s < 0.55 || (s < 0.7 && d)) ? 'r' : 'R';
+        });
+      }
+    });
+    return b;
+  }
+
+  // ------------------------------------------------------------ TRACTOR, SIDE VIEW (264 x 150 grid, facing RIGHT)
+  // Separate parts so they can be animated: body (+driver), 2 wheels (rotatable), 3 passengers, flames, smoke.
+  var SIDE = {
+    W: 264, H: 150,
+    rear: { cx: 80, cy: 112, R: 36, sp: 8 }, front: { cx: 196, cy: 128, R: 20, sp: 6 },
+    stacks: [168, 186],                       // stack left x; tops at y 44 (flames at y 30), smoke rises above that
+    passengers: [{ v: 'shovel', x: 6, y: 77 }, { v: 'fork', x: 124, y: 46 }, { v: 'knife', x: 205, y: 46 }, { v: 'trowel', x: 26, y: 77 }],   // (4th seat = trowel, added for the game: rear deck beside the shovel gnome)
+    smokeY: -13, driverX: 68, driverY: 42
+  };
+  function buildSideDriver() { // seated gnome in profile facing right (32 x 32)
+    var b = buf(32, 32), x, y, i, hat = 'def', coat = 'def';
+    for (y = 20; y <= 31; y++) span(b, y, 4, 20, coat, (y - 20) / 12);                    // torso
+    for (x = 14; x <= 27; x++) { var ay = 25 - Math.floor((x - 14) / 5); for (y = ay; y <= ay + 3; y++) set(b, x, y, coat[(y === ay + 3) ? 2 : (y === ay ? 0 : 1)]); }
+    for (y = 20; y <= 24; y++) set(b, 27, y + 2, 'x');
+    set(b, 26, 22, 'x'); set(b, 26, 23, 'z'); set(b, 26, 24, 'z'); set(b, 26, 25, 'z');   // cuff
+    box(b, 28, 21, 31, 25, 'sSS');                                                         // hand on the wheel
+    for (y = 13; y <= 18; y++) for (x = 13; x <= 20; x++) set(b, x, y, y === 13 ? 'S' : 's');   // face
+    set(b, 21, 15, 'n'); set(b, 22, 15, 'n'); set(b, 21, 16, 'n'); set(b, 22, 16, 'n'); set(b, 23, 16, 'n'); set(b, 21, 17, 'S'); set(b, 22, 17, 'S');
+    set(b, 18, 15, 'K'); set(b, 19, 15, 'K');
+    for (y = 16; y <= 28; y++) {                                                           // beard hangs forward-down
+      var bw = Math.max(1, 5.5 - (y - 18) * 0.45), bc = 15 + (y > 19 ? (y - 19) * 0.12 : 0);
+      for (x = Math.ceil(bc - bw); x <= Math.floor(bc + bw - 1); x++) {
+        if (y <= 18 && x >= 14 && x <= 20 && y >= 16 && y <= 17 && x > 15) continue;
+        set(b, x, y, 'wxz'[sh((x - (bc - bw)) / (2 * bw) * 0.8, (y - 16) / 13 * 0.9, x, y)]);
+      }
+    }
+    for (x = 18; x <= 23; x++) { set(b, x, 17, 'w'); set(b, x, 18, x > 21 ? 'z' : 'x'); }   // moustache
+    for (y = 0; y <= 12; y++) {                                                            // hat, tip swept back
+      var tt = (12 - y) / 12, hw = 0.6 + y * 0.6, c = 16 - 9 * tt * tt;
+      var xa = Math.round(c - hw), xb = Math.max(xa, Math.round(c + hw) - 1);
+      for (x = xa; x <= xb; x++) {
+        var idx = sh((x - xa + 0.5) / (xb - xa + 1), y / 12, x, y);
+        if (y === 10) idx = (x + y) & 1 ? 0 : idx; else if (y === 11) idx = 2; else if (y === 12) idx = idx === 2 ? 1 : 0;
+        set(b, x, y, hat[idx]);
+      }
+    }
+    outline(b, 'K');
+    return b;
+  }
+  function skullBadge(b, cx, cy) {
+    var x, y;
+    disc(b, cx + 0.5, cy, 9.5, function (dx, dy) { return (dx * dx + dy * dy > 0.7) ? (dx + dy < 0 ? 'y' : 'Y') : 'J'; });
+    for (y = cy - 6; y <= cy + 4; y++) {
+      var sw = y === cy - 6 ? 2 : (y <= cy - 1 ? 4 : (y === cy ? 3 : 2));
+      for (x = cx - sw; x <= cx + sw; x++) set(b, x, y, (x > cx && y > cy - 2) ? 'x' : 'w');
+    }
+    [[-3, -3], [-2, -3], [-3, -2], [-2, -2], [2, -3], [3, -3], [2, -2], [3, -2], [0, 0], [-1, 0]].forEach(function (p) { set(b, cx + p[0], cy + p[1], 'K'); });
+    for (x = cx - 2; x <= cx + 2; x++) set(b, x, cy + 3, (x & 1) ? 'K' : 'w');
+  }
+  function buildSideBody(driver) {
+    var b = buf(SIDE.W, SIDE.H), x, y, i, d, R = SIDE.rear, F = SIDE.front;
+    // rear deck plank + hitch (passenger A stands here)
+    box(b, 6, 114, 50, 118, 'IJL'); for (x = 10; x < 48; x += 8) set(b, x, 115, 'N');
+    box(b, 44, 119, 52, 123, 'IJL');
+    // brass canopy frame + seat
+    box(b, 52, 31, 54, 74, 'yYQ'); box(b, 118, 31, 120, 86, 'yYQ'); brass(b, 50, 122, 28, 31);
+    disc(b, 119.5, 41, 3.6, function (ddx, ddy) { return (ddx * ddx + ddy * ddy < 0.25) ? 'L' : 'E'; });
+    box(b, 60, 56, 62, 74, 'yYQ'); box(b, 60, 72, 100, 76, 'yYQ');
+    if (driver) paste(b, buildSideDriver(), SIDE.driverX, SIDE.driverY);
+    // steering column + tilted brass wheel
+    for (i = 0; i <= 28; i++) { set(b, 103 + Math.round(i * 0.55), 60 + i, 'Y'); set(b, 104 + Math.round(i * 0.55), 60 + i, 'Q'); }
+    for (var a = 0; a < 6.3; a += 0.06) { var rx = Math.round(103 + 3 * Math.cos(a)), ry = Math.round(60 + 10 * Math.sin(a)); set(b, rx, ry, a > 2.4 && a < 4.6 ? 'y' : 'Y'); set(b, rx + 1, ry, 'Q'); }
+    // rear mudguard (green arc over the big wheel)
+    for (y = 60; y <= 112; y++) for (x = 36; x <= 124; x++) {
+      d = Math.sqrt((x + 0.5 - R.cx) * (x + 0.5 - R.cx) + (y + 0.5 - R.cy) * (y + 0.5 - R.cy));
+      if (d > R.R + 1.5 && d <= R.R + 5.5 && y < R.cy - 6) set(b, x, y, d > R.R + 4.2 ? 'l' : (x < R.cx ? 'j' : 'k'));
+    }
+    // hood: green shell, crenellated top, iron brow band, iron bottom band
+    for (y = 86; y <= 128; y++) { span(b, y, 122, 244, 'jkl', (y - 86) / 42 * 0.6); set(b, 122, y, 'l'); set(b, 244, y, 'l'); set(b, 123, y, 'j'); }
+    for (x = 124; x <= 240; x += 8) for (y = 83; y <= 85; y++) for (i = 0; i < 5; i++) set(b, x + i, y, i === 0 ? 'j' : (i === 4 ? 'l' : 'k'));
+    for (x = 122; x <= 244; x++) { set(b, x, 86, 'I'); set(b, x, 87, 'J'); set(b, x, 88, 'J'); set(b, x, 89, 'L'); set(b, x, 125, 'I'); set(b, x, 126, 'J'); set(b, x, 127, 'J'); set(b, x, 128, 'L'); }
+    for (x = 128; x <= 242; x += 10) { set(b, x, 87, 'N'); set(b, x, 126, 'N'); }
+    // hood-side medallion with skull, small gauge
+    skullBadge(b, 146, 108);
+    disc(b, 131, 119, 4.6, function (dx, dy) { return (dx * dx + dy * dy > 0.5) ? (dx + dy < 0 ? 'y' : 'Y') : 'x'; });
+    set(b, 131, 118, 'K'); set(b, 132, 117, 'K');
+    // face in profile: one glowing eye with a slanted brow plate, side of the toothed mouth
+    for (x = 222; x <= 244; x++) { var bt = 90 + Math.round((x - 222) * 0.2); for (y = bt; y <= bt + 2; y++) set(b, x, y, y === bt ? 'I' : (y === bt + 2 ? 'L' : 'J')); }
+    disc(b, 234, 100, 6.4, function () { return 'L'; });
+    disc(b, 234, 100, 5.3, function (dx, dy) { var dd = Math.sqrt(dx * dx + dy * dy); return dd < 0.33 ? 'o' : (dd < 0.62 ? 'p' : (dd < 0.85 ? 'q' : 'E')); });
+    set(b, 232, 98, 'w'); set(b, 233, 97, 'w');
+    for (y = 108; y <= 124; y++) for (x = 220; x <= 244; x++) set(b, x, y, (y <= 109 || y >= 123 || x <= 221) ? ((y <= 109 || x <= 221) ? 'j' : 'l') : 'L');
+    for (y = 111; y <= 121; y++) for (x = 223; x <= 244; x++) { var g1 = Math.abs(x - 238) / 16, g2 = Math.abs(y - 116) / 7, g = 1 - Math.sqrt(g1 * g1 * 0.6 + g2 * g2); set(b, x, y, g > 0.55 ? 'o' : (g > 0.3 ? 'p' : 'q')); }
+    for (i = 0; i < 4; i++) tooth(b, 223 + (i + 0.5) * 5.5, 110, 5.5, 6, 1);
+    for (i = 0; i < 4; i++) tooth(b, 225.5 + i * 5.5, 123, 5.5, 5, -1);
+    // brass bumper
+    box(b, 244, 112, 252, 126, 'yYQ'); for (y = 114; y <= 124; y += 5) set(b, 248, y, 'y');
+    // spiked iron mudguard over the front wheel
+    for (y = 90; y <= 128; y++) for (x = 170; x <= 226; x++) {
+      d = Math.sqrt((x + 0.5 - F.cx) * (x + 0.5 - F.cx) + (y + 0.5 - F.cy) * (y + 0.5 - F.cy));
+      if (d > F.R + 1.5 && d <= F.R + 4.5 && y < F.cy - 5) set(b, x, y, d > F.R + 3.5 ? 'L' : (x < F.cx ? 'I' : 'J'));
+    }
+    [-140, -115, -90, -65, -40].forEach(function (deg) {
+      var ca = Math.cos(deg * Math.PI / 180), sa = Math.sin(deg * Math.PI / 180);
+      for (var r = F.R + 4; r <= F.R + 11; r++) {
+        var half = 1.7 * (1 - (r - F.R - 4) / 7.5);
+        for (var k = -2; k <= 2; k++) if (Math.abs(k) <= half) set(b, F.cx + r * ca + k * -sa, F.cy + r * sa + k * ca, k < 0 ? 'm' : 'M');
+      }
+    });
+    // brass stacks with bands, gauge
+    SIDE.stacks.forEach(function (s) {
+      box(b, s, 48, s + 8, 84, 'yYQ');
+      for (x = s; x <= s + 8; x++) { set(b, x, 56, 'Q'); set(b, x, 57, 'Y'); set(b, x, 70, 'Q'); set(b, x, 71, 'Y'); }
+      for (x = s + 1; x <= s + 7; x += 3) { set(b, x, 56, 'y'); set(b, x, 70, 'y'); }
+      box(b, s - 1, 44, s + 9, 47, 'yYY'); for (x = s - 1; x <= s + 9; x++) set(b, x, 47, 'Q');
+      box(b, s - 1, 79, s + 9, 85, 'yYQ');
+      disc(b, s + 4.5, 63, 3.8, function (ddx, ddy) { return (ddx * ddx + ddy * ddy > 0.5) ? 'Y' : 'x'; });
+      set(b, s + 4, 62, 'K'); set(b, s + 5, 63, 'E');
+    });
+    outline(b, 'K');
+    return b;
+  }
+  function buildSideWheel(which, rot) { // which: 'rear' | 'front'; returns {b, ox, oy} (offset of the buffer in the side grid)
+    var w = SIDE[which], b = buf(2 * w.R + 3, 2 * w.R + 3);
+    wheel(b, w.R + 1, w.R + 1, w.R, w.sp, rot || 0);
+    for (var i = -1; i <= 1; i++) set(b, w.R + 1 + i, w.R + 1, 'Q'), set(b, w.R + 1, w.R + 1 + i, 'Q');
+    outline(b, 'K');
+    return { b: b, ox: w.cx - w.R - 1, oy: w.cy - w.R - 1 };
+  }
+  function buildSideSmoke(frame) {
+    var b = buf(SIDE.W, 46);
+    SIDE.stacks.forEach(function (s0) {
+      for (var k = 0; k < 4; k++) {
+        var age = ((frame * 0.04) + k / 4) % 1, r = 1.8 + age * 3.6 + (k % 2) * 0.6;
+        var cx = s0 + 4 - age * 12 + (k % 2 ? 2 : -1), cy = 43 - age * 41;
+        disc(b, cx, cy, r, function (dx, dy, px, py) {
+          var s = (dx + dy) * 0.5 + 0.5, d = (px + py) & 1;
+          return (s < 0.55 || (s < 0.7 && d)) ? 'r' : 'R';
+        });
+      }
+    });
+    return b;
+  }
+  function buildSidePassenger(i) {
+    var p = SIDE.passengers[i], o = {}, v = VARIANTS[p.v];
+    for (var k in v) o[k] = v[k];
+    o.noShadow = true;
+    return { b: buildGnome(o), ox: p.x, oy: p.y };
+  }
+  function blitFlip(ctx, b, ox, oy, s, px, py, flip) { // draw part b at grid cell (px,py) of a SIDE.W-wide tractor; flip mirrors to face left
+    ctx.imageSmoothingEnabled = false;
+    for (var j = 0; j < b.h; j++) for (var i = 0; i < b.w; i++) {
+      var c = b.a[j][i]; if (!c) continue;
+      var gx = flip ? (SIDE.W - 1 - (px + i)) : (px + i);
+      ctx.fillStyle = PAL[c]; ctx.fillRect(ox + gx * s, oy + (py + j) * s, s, s);
+    }
+  }
+
+  var api = {
+    PAL: PAL, VARIANTS: VARIANTS, buildGnome: buildGnome, buildTractor: buildTractor,
+    buildFlame: buildFlame, buildSmoke: buildSmoke, blit: blit, buf: buf, set: set,
+    SIDE: SIDE, buildSideBody: buildSideBody, buildSideDriver: buildSideDriver, buildSideWheel: buildSideWheel,
+    buildSideSmoke: buildSideSmoke, buildSidePassenger: buildSidePassenger, blitFlip: blitFlip
+  };
+  return api;
+})();
+
+function drawGnome(ctx, x, y, scale, variant, shadowChar) {
+  var v = ENEMY_ART.VARIANTS[variant || 'trowel'], o = {};
+  for (var k in v) o[k] = v[k];
+  if (shadowChar) o.shadow = shadowChar;
+  ENEMY_ART.blit(ctx, ENEMY_ART.buildGnome(o), x, y, scale);
+}
+function drawTractorFlames(ctx, x, y, scale, frame) {
+  var f = ENEMY_ART.buildFlame(frame || 0), g = ENEMY_ART.buildFlame((frame || 0) + 2);
+  ENEMY_ART.blit(ctx, f, x + 46 * scale, y - 14 * scale, scale);
+  ENEMY_ART.blit(ctx, g, x + 134 * scale, y - 14 * scale, scale);
+}
+function drawTractorSmoke(ctx, x, y, scale, frame) {
+  ENEMY_ART.blit(ctx, ENEMY_ART.buildSmoke(frame || 0), x, y - 50 * scale, scale);
+}
+function drawMurderTractorSide(ctx, x, y, scale, opts) {
+  opts = opts || {};
+  var A = ENEMY_ART, S = A.SIDE, f = opts.frame || 0, flip = !!opts.flip, rot = opts.wheelRot || 0, i;
+  var ox = x + (opts.shakeX || 0) * scale, oy = y + (opts.shakeY || 0) * scale;
+  var pax = opts.passengers === undefined ? true : opts.passengers;   // true | false | [bool, bool, bool, bool]
+  if (opts.smoke !== false) A.blitFlip(ctx, A.buildSideSmoke(f), ox, oy, scale, 0, S.smokeY, flip);
+  A.blitFlip(ctx, A.buildSideBody(opts.driver !== false), ox, oy, scale, 0, 0, flip);
+  for (i = 0; i < 4; i++) if (pax === true || (pax && pax[i])) { var p = A.buildSidePassenger(i); A.blitFlip(ctx, p.b, ox, oy, scale, p.ox, p.oy, flip); }
+  var wr = A.buildSideWheel('rear', rot), wf = A.buildSideWheel('front', rot * S.rear.R / S.front.R);
+  A.blitFlip(ctx, wr.b, ox, oy, scale, wr.ox, wr.oy, flip); A.blitFlip(ctx, wf.b, ox, oy, scale, wf.ox, wf.oy, flip);
+  if (opts.flames !== false) S.stacks.forEach(function (sx, k) { A.blitFlip(ctx, A.buildFlame(f + k * 2), ox, oy, scale, sx - 1, 30, flip); });
+}
+function drawMurderTractor(ctx, x, y, scale, opts) {
+  opts = opts || {};
+  if (opts.view === 'side') return drawMurderTractorSide(ctx, x, y, scale, opts);
+  var ox = x + (opts.shakeX || 0) * scale, oy = y + (opts.shakeY || 0) * scale;
+  if (opts.smoke !== false) drawTractorSmoke(ctx, ox, oy, scale, opts.frame);
+  if (opts.flames !== false) drawTractorFlames(ctx, ox, oy, scale, opts.frame);
+  ENEMY_ART.blit(ctx, ENEMY_ART.buildTractor(opts.driver !== false), ox, oy, scale);
+}
 // ---------------------------------------------------------------------
 // HL = the demo hallway (Level2Hall.html: LEVEL2 config, proj/depthScale/floorY, drawHall, drawDoor, wallSign/makeSign, wingArch,
 // goo, fx, drawRoach, Pete placement) ported as built. Same projection, same drawing code. The only changes: (a) layout() maps the
@@ -4893,6 +5478,7 @@ const HL=(function(){
       vq(side*hw,j.z0,side*fx2,j.flareZ,150,160,'#3c8c88');
       vq(side*hw,j.z0,side*fx2,j.flareZ,96,106,'#c4cfcc');
       wingArch(side);
+      if(side<0){ const t0=0.87, t1=0.995; vq(-(hw+(fx2-hw)*t0),j.z0+(j.flareZ-j.z0)*t0,-(hw+(fx2-hw)*t1),j.z0+(j.flareZ-j.z0)*t1,0,262,'#04070a','#26302f',2); }   // dark side-hall opening at the far left: the murder tractor rolls out of it
     }
     // stem side walls: pale green upper wall, darker dado, teal band, handrail, cove base, seams (end at the junction)
     for(const side of [-1,1]){
@@ -4958,10 +5544,23 @@ const HL=(function(){
     }
   }
   function drawFx(fx){
-    for(const p of fx){ const q=proj(p.X,p.Y,p.z), dust=p.kind==='dust', rr=Math.max(1.5,(dust?3.6:5)*q.s), a=Math.min(1,p.life/20);
-      ctx.globalAlpha=a; ctx.fillStyle=dust?'#7a6a58':'#2e6a16'; ctx.beginPath(); ctx.arc(q.x,q.y,rr+1,0,7); ctx.fill();
-      ctx.fillStyle=dust?'#d8cdb8':'#86e84a'; ctx.beginPath(); ctx.arc(q.x,q.y,rr,0,7); ctx.fill(); }
+    for(const p of fx){ const q=proj(p.X,p.Y,p.z), dust=p.kind==='dust', blood=p.kind==='blood', rr=Math.max(1.5,(dust?3.6:5)*q.s), a=Math.min(1,p.life/20);
+      ctx.globalAlpha=a; ctx.fillStyle=dust?'#7a6a58':(blood?'#5a0a10':'#2e6a16'); ctx.beginPath(); ctx.arc(q.x,q.y,rr+1,0,7); ctx.fill();
+      ctx.fillStyle=dust?'#d8cdb8':(blood?'#c4161c':'#86e84a'); ctx.beginPath(); ctx.arc(q.x,q.y,rr,0,7); ctx.fill(); }
     ctx.globalAlpha=1;
+  }
+  // ---- blood pools (Level 2 fight 2): same flat floor decal as the goo, red; permanent for the level ----
+  function drawBlood(bl){
+    for(const g of bl){
+      const k=0.3+0.7*ease(clamp(g.age/14,0,1)), c=proj(g.x,0,g.z);
+      polyPts(gooPts(g,k,false),'#5a0a10');                                   // dark rim
+      polyPts(gooPts(g,k,true),'#b3141c');                                    // body
+      ctx.fillStyle='rgba(255,120,120,.5)'; ctx.beginPath(); ctx.ellipse(c.x-11*c.s*k,c.y-5*c.s*k,18*c.s*k,6*c.s*k,0,0,7); ctx.fill();   // wet sheen
+      for(const st of g.streaks){ const a=proj(g.x+Math.cos(st.a)*st.d0*k,0,g.z+Math.sin(st.a)*st.d0*k*0.9), b=proj(g.x+Math.cos(st.a)*st.d1*k,0,g.z+Math.sin(st.a)*st.d1*k*0.9); seg(a,b,'#8a0f16',Math.max(1.2,3*a.s)); }
+      for(const d of g.drops){ const p=proj(g.x+Math.cos(d.a)*d.d*k,0,g.z+Math.sin(d.a)*d.d*k*0.9), rr=Math.max(1.5,d.r*p.s);
+        ctx.fillStyle='#5a0a10'; ctx.beginPath(); ctx.ellipse(p.x,p.y,rr*1.25,rr*0.8,0,0,7); ctx.fill();
+        ctx.fillStyle='#b3141c'; ctx.beginPath(); ctx.ellipse(p.x,p.y,rr,rr*0.6,0,0,7); ctx.fill(); }
+    }
   }
   // ---- roach: drawn in FLOOR space (every point goes through proj), so it scales and foreshortens like Pete ----
   function drawRoach(r,T){
@@ -5011,11 +5610,239 @@ const HL=(function(){
     const cy=VT+VH*0.45, vg=ctx.createRadialGradient(VW/2,cy,VH*0.35,VW/2,cy,VH*0.95);   // moody vignette (demo render)
     vg.addColorStop(0,'rgba(0,0,0,0)'); vg.addColorStop(1,'rgba(0,0,0,.55)'); ctx.fillStyle=vg; ctx.fillRect(0,VT,VW,VH);
   }
-  return { layout, rawScale, depthScale, floorY, proj, peteScreenScale, xLimit, drawHall, drawDoor, drawGoo, drawFx, drawRoach, peteFrame, drawShadow, drawVignette,
+  return { layout, rawScale, depthScale, floorY, proj, peteScreenScale, xLimit, drawHall, drawDoor, drawGoo, drawBlood, drawFx, drawRoach, peteFrame, drawShadow, drawVignette,
            view:()=>({VK,VPX,VPY,VT,VW,VH}) };
 })();
 let LV=null;   // runtime state of the loaded level (null outside a framework level)
 function l2Reset(){ LV=null; }
+// =====================================================================
+// LEVEL 2, FIGHT 2: the murder tractor event + 4 hopping garden gnomes. Every number lives in GN (frames at 60 fps, hall units).
+// Event: knock after the roaches -> tractor rolls in at the far back (left -> right, side view), stops mid-hall, turns to face Pete (front view),
+// revs; the 4 riders hop off one by one (the blue driver stays). Gnomes are NOT in LV.mobs (no roach code touches them).
+// =====================================================================
+const GN={
+  fistY:135, rows:38, hatMidRow:6.5,                       // sprite is 38 cells from hat tip to sole; Pete's punch lands at fistY, so the HAT MIDDLE (row 6.5) sits at fistY
+  kRide:2.4, kMid:3.35, kT:2.4,                            // hall units per art cell: riders on the tractor, mid-grow, tractor
+  hp:3,                                                    // 3 hits drop it; once stood back up it has 1
+  hopLen:84, hopFrames:36, hopCrouch:6, hopAir:24, hopApex:56, speedJit:0.08, redDist:420,
+  pokeTrig:95, pokeHit:110, windup:24, strike:6, recover:14, cooldown:50, cdHit:30, pokeAir:25,
+  stutter:10, push:14, kickV:15, kickMax:40, kickApex:40, wallX:380, wallBounce:0.4, wallFrames:8, landSq:14, stagger:20,
+  upV:26, upVX:9, grav:0.75, ceil:514,                      // uppercut: 26 u/f up, hat always reaches the ceiling plane (hall ceiling 520) and bounces
+  fall:14, down:120, blink:54, getup:24, dying:16,         // 120 = 2 s lying still, then 54 frames of blinking, then 24 to stand up
+  bloodCap:4, bloodFade:1800,
+  riders:3, reinf:4/3, kickVX:14, kickVY:24, kickSpin:0.34, kickBounce:0.55, fan:1.3, sep:100, sideX:717, smokeLife:90,   // 3 hop off, the 4th rider reinforces at x1.33 after 2 finish; kick = up+back tumble (same 'air' bounce code as the uppercut)
+  freeze:90, rollX0:-1040, tz:1275, rollV:5.2, rollEnd:160, stopT:240, turnT0:240, turnT1:262, hopStart:330, hopGap:45, hopOffFrames:40, slotZ:1235, slotX0:-135, slotDX:90
+};
+GN.kFight=GN.fistY/(GN.rows-GN.hatMidRow);                 // 135/31.5 = 4.29 units per cell -> a gnome is about 163 units tall (Pete = 200)
+const GN_LANE=[[-80,0],[80,0],[0,75],[0,-70]];            // per-gnome attack lane around Pete (hall units x,z): left, right, centre-behind, rider in front
+const GN_STAND=['hop','idle','windup','poke','recover','stut'], GN_DOWN=['fall','down','blink'];
+const GN_SEAT_SIDE={shovel:[23,115],fork:[141,84],knife:[222,84],trowel:[43,115]}, GN_SEAT_FRONT={trowel:[26,61],shovel:[162,61],knife:[66,45],fork:[124,45]};   // foot-centre cells on the tractor art
+// ---- sprite glue: ENEMY_ART buffers -> cached 1 px/cell canvases (drawn scaled with smoothing off) ----
+const _eaCache={};
+function eaCanvas(b){ const c=document.createElement('canvas'); c.width=b.w; c.height=b.h; const g=c.getContext('2d'), P=ENEMY_ART.PAL;
+  for(let j=0;j<b.h;j++) for(let i=0;i<b.w;i++){ const k=b.a[j][i]; if(k){ g.fillStyle=P[k]; g.fillRect(i,j,1,1); } } return c; }
+function eaWhite(c){ const w=document.createElement('canvas'); w.width=c.width; w.height=c.height; const g=w.getContext('2d'); g.drawImage(c,0,0); g.globalCompositeOperation='source-in'; g.fillStyle='#fff'; g.fillRect(0,0,w.width,w.height); return w; }
+function eaGnome(variant,red){                              // {full, body, tool, white}: the tool layer = hand + weapon (cols <=7 of the art, <=9 above row 22 for the cultivator tines; mirrored for the knife gnome)
+  const key='g'+variant+(red?'R':''); if(_eaCache[key]) return _eaCache[key];
+  const v=ENEMY_ART.VARIANTS[variant], o={}; for(const k in v) o[k]=v[k]; o.noShadow=true;
+  const b=ENEMY_ART.buildGnome(o), mir=!!v.mirror, W=b.w, cx=17;
+  if(red){ for(const e of [cx-2,cx+2]) for(let dx=0;dx<2;dx++) for(let y=14;y<=15;y++){ const x=mir?W-1-(e+dx):e+dx; b.a[y][x]=(dx===0&&y===15)?'o':'E'; } }   // eyes: 2x2 red-glow patch with a yellow core
+  const body=ENEMY_ART.buf(b.w,b.h), tool=ENEMY_ART.buf(b.w,b.h);
+  for(let y=0;y<b.h;y++) for(let x=0;x<b.w;x++){ const c=b.a[y][x]; if(!c) continue; const cut=(variant==='fork'&&y<22)?9:7, xx=mir?W-1-x:x; (xx<=cut?tool:body).a[y][x]=c; }
+  const full=eaCanvas(b); return _eaCache[key]={full,body:eaCanvas(body),tool:eaCanvas(tool),white:eaWhite(full)};
+}
+function eaSideBody(){ return _eaCache.sb||(_eaCache.sb=eaCanvas(ENEMY_ART.buildSideBody(true))); }
+function eaFrontBody(){ return _eaCache.fb||(_eaCache.fb=eaCanvas(ENEMY_ART.buildTractor(true))); }
+function eaWheel(which){ const k='w'+which; if(_eaCache[k]) return _eaCache[k]; const w=ENEMY_ART.buildSideWheel(which,0); return _eaCache[k]={c:eaCanvas(w.b),ox:w.ox,oy:w.oy}; }
+function eaFlame(f){ f&=7; const k='f'+f; return _eaCache[k]||(_eaCache[k]=eaCanvas(ENEMY_ART.buildFlame(f))); }
+function eaSmoke(side,f){ f=((f%25)+25)%25; const k=(side?'ss':'sf')+f; return _eaCache[k]||(_eaCache[k]=eaCanvas(side?ENEMY_ART.buildSideSmoke(f):ENEMY_ART.buildSmoke(f))); }
+// ---- gnome + tractor state ----
+function gnomeNew(v,i){ return {v,i,state:'rider',t:0,hp:GN.hp,stood:false,x:0,y:0,z:0,k:GN.kRide,k0:GN.kRide,k1:GN.kRide,face:1,fd:1,flash:0,stut:0,sq:0,fz:0,cd:0,hops:0,hx0:0,hy0:0,hz0:0,hx1:0,hz1:0,vx:0,vy:0,rot:0,vr:0,kick:false,hof:GN.hopOffFrames,
+  spd:i===3?GN.reinf:1+((i%2)?1:-1)*GN.speedJit*(0.4+i*0.2),downAfter:false,red:false}; }
+function l2GnomesAlive(){ let n=0; for(const g of LV.gnomes) if(g.state!=='dead'&&g.state!=='dying') n++; return n; }
+function gnomeSeat(g){ const tr=LV.ev.tr, side=tr.view==='side', c=(side?GN_SEAT_SIDE:GN_SEAT_FRONT)[g.v], W=side?264:190, H=side?150:124;
+  return {x:tr.x+(c[0]-W/2+tr.shx)*GN.kT*tr.sx, y:(H-c[1]-tr.shy)*GN.kT, z:tr.z-2}; }
+function l2StartEvent(){
+  const E=LV.ev; E.phase='roll'; E.t=0; E.freeze=GN.freeze;
+  E.tr={x:GN.rollX0,z:GN.tz,view:'side',sx:1,alpha:1,f:0,rot:0,shx:0,shy:0}; E.smoke=[]; E.rev=false;   // starts hidden inside the side hall (clipped at the opening)
+  LV.gnomes=['trowel','shovel','knife','fork'].map((v,i)=>gnomeNew(v,i));
+  pete.face='left'; cancelAttack();
+}
+function l2ResetFight2(){                                   // Pete reached 0 HP during fight 2: gnomes back on the tractor, blood gone (roach goo stays)
+  const E=LV.ev; LV.gnomes=LV.gnomes.map((g,i)=>gnomeNew(g.v,i)); LV.blood=[]; LV.fx=[]; pete.footBlood=0; E.phase='rev'; E.t=GN.hopStart-30;
+}
+function l2EventUpdate(){
+  const E=LV.ev; if(E.phase==='idle'||!E.tr) return;
+  const tr=E.tr, hold=!!LV.dlg; tr.f++;
+  const amp=E.phase==='roll'?(E.t<GN.rollEnd?1:1.5):2;     // engine shake in art cells: rolling 1, idling 1.5, revving 2
+  tr.shx=((tr.f>>1)&1)?amp:-amp; tr.shy=(((tr.f+1)>>1)&1)?amp*0.5:-amp*0.5;
+  if(!hold){
+    if(E.freeze>0) E.freeze--;
+    const t=++E.t;
+    if(t<=GN.stopT){ const x0=tr.x;
+      if(t<=GN.rollEnd) tr.x=GN.rollX0+GN.rollV*t; else { const u=(t-GN.rollEnd)/(GN.stopT-GN.rollEnd), xe=GN.rollX0+GN.rollV*GN.rollEnd; tr.x=xe-xe*(1-(1-u)*(1-u)); }   // ease-out to the hall centre
+      tr.rot+=(tr.x-x0)/(36*GN.kT); }
+    if(t>GN.turnT0 && t<=GN.turnT1){ if(t<=GN.turnT0+10) tr.sx=1-(t-GN.turnT0)/10; else { tr.view='front'; tr.sx=(t-GN.turnT0-10)/12; } }   // squash to nothing, swap to the front view, expand
+    else if(t>GN.turnT1){ tr.view='front'; tr.sx=1; if(E.phase==='roll') E.phase='rev'; }
+    l2SmokeUpdate(E,tr,t);
+    const fin=LV.gnomes.filter(g=>g.i<GN.riders&&(g.state==='dying'||g.state==='dead')).length;     // gnomes finished by a stomp
+    LV.gnomes.forEach((g,i)=>{ const first=i<GN.riders&&t>=GN.hopStart+GN.hopGap*i, reinf=i>=GN.riders&&E.phase==='fight'&&fin>=2;   // 3 hop off one by one; the 4th rider (and the driver) stay until 2 are finished
+      if(g.state==='rider' && (first||reinf)){
+      const s=gnomeSeat(g); g.hx0=s.x; g.hy0=s.y; g.hz0=s.z; g.hx1=GN.slotX0+GN.slotDX*i; g.hz1=GN.slotZ; g.k0=GN.kRide; g.k1=GN.kMid; g.hof=Math.round(GN.hopOffFrames/(i>=GN.riders?g.spd:1)); g.cd=[0,25,50,12][i]||0; g.state='hopoff'; g.t=0; g.face=1; } });   // hop-off time scales with the rider's x1.33
+    if(E.phase==='rev' && LV.gnomes.every(g=>g.i>=GN.riders||(g.state!=='rider'&&g.state!=='hopoff'))) E.phase='fight';
+    if(E.phase==='fight' && l2GnomesAlive()===0) E.phase='cleared';
+    for(const g of LV.gnomes) gnomeUpdate(g);
+  } else for(const g of LV.gnomes) if(g.state==='rider'){ const s=gnomeSeat(g); g.x=s.x; g.y=s.y; g.z=s.z; }
+}
+// exhaust smoke: world-space puffs spawned at the stack tops (both views), drawn with the tractor; more + darker during rev pulses
+function l2SmokeUpdate(E,tr,t){
+  if(!E.smoke) E.smoke=[];
+  E.rev=E.phase!=='roll' && (t%240)<80;                    // rev pulse: 80 frames out of every 240 once the tractor has stopped
+  const side=tr.view==='side', W=side?264:190, H=side?150:124, st=side?ENEMY_ART.SIDE.stacks.map(s=>[s+4,44]):[[51,4],[139,4]], every=E.rev?1:4;
+  if(tr.sx>0.3 && t%every===0) st.forEach((c,k)=>{
+    const n=E.rev?2:1; for(let j=0;j<n;j++) E.smoke.push({X:tr.x+(c[0]-W/2+tr.shx)*GN.kT*tr.sx+(Math.random()-0.5)*6, Y:(H-c[1]-tr.shy)*GN.kT, vx:0.25+Math.random()*0.5, vy:1.1+Math.random()*0.8+(E.rev?0.6:0),
+      r:7+Math.random()*4+(E.rev?3:0), gr:0.32+Math.random()*0.15, age:0, life:GN.smokeLife*(0.8+Math.random()*0.4), dark:E.rev?0.75+Math.random()*0.25:0.15+Math.random()*0.3, ph:Math.random()*6+k}); });
+  for(let i=E.smoke.length-1;i>=0;i--){ const p=E.smoke[i]; p.age++; p.X+=p.vx+Math.sin((p.age+p.ph*9)*0.09)*0.35; p.Y+=p.vy; p.vy*=0.992; p.r+=p.gr; if(p.age>=p.life) E.smoke.splice(i,1); }
+}
+function l2PeteLow(){ const air=ROAD-footY(pete); return air<GN.pokeAir/(peteModelH()*LAB_SCALE)*pete.h*LANE_SCALE[0] && (pete.onGround||pete.vy<=0); }   // jumping clears the poke (same rule as the roach touch)
+function gnomeStartFall(g){ g.state='fall'; g.t=0; g.y=0; g.downAfter=false; g.red=false; g.fd=Math.sign(g.x-pete.hx)||g.face; }
+function gnomeDecide(g){
+  const dx=pete.hx-g.x, dz=pete.hz-g.z, d=Math.hypot(dx,dz*0.8), dd=Math.hypot(dx,dz)||1;
+  g.face=dx>=0?1:-1; g.t=0;
+  if(d<=GN.pokeTrig){ g.state=g.cd<=0?'windup':'idle'; return; }                // in reach: wind up the poke (or wait out the cooldown)
+  const ln=GN_LANE[g.i]||GN_LANE[0], f=Math.max(0,Math.min(1,(dd-150)/250)), ax=pete.hx+ln[0]*(1+f*GN.fan), az=pete.hz+ln[1];   // each gnome aims at its own lane (left / right / behind / front), fanned wider while far away
+  const ex0=ax-g.x, ez0=az-g.z, ed0=Math.hypot(ex0,ez0)||1, step=Math.min(GN.hopLen*g.spd,Math.max(24,ed0));
+  let tx=g.x+ex0/ed0*step, tz=g.z+ez0/ed0*step;
+  for(const o of LV.gnomes){ if(o===g||!(GN_STAND.includes(o.state)||o.state==='hopoff'||o.state==='land')) continue; const ex=tx-o.x, ez=tz-o.z, ed=Math.hypot(ex,ez); if(ed<GN.sep&&ed>0.1){ tx+=ex/ed*(GN.sep-ed)*0.7; tz+=ez/ed*(GN.sep-ed)*0.7; } }   // simple separation: keep ~100 apart
+  g.hx0=g.x; g.hz0=g.z; g.hx1=Math.max(-GN.wallX,Math.min(GN.wallX,tx)); g.hz1=Math.max(110,Math.min(1310,tz));
+  g.k0=g.k; g.k1=g.k<GN.kRide+0.01?GN.kMid:GN.kFight; g.hops++; g.state='hop';
+}
+function gnomePoke(g){ const d=Math.hypot(pete.hx-g.x,(pete.hz-g.z)*0.8); if(pete.hurt<=0 && !LV.exit && d<=GN.pokeHit && l2PeteLow()) l2HurtPete(g,{dmg:1}); }   // 1 damage, once per strike; Pete's 90-frame blink protects him
+function gnomeUpdate(g){
+  if(g.state==='rider'){ const s=gnomeSeat(g); g.x=s.x; g.y=s.y; g.z=s.z; g.k=GN.kRide; return; }
+  if(g.state==='dead') return;
+  if(g.flash>0) g.flash--; if(g.cd>0) g.cd--; if(g.stut>0) g.stut--; if(g.sq>0) g.sq--;
+  if(g.fz>0){ g.fz--; return; }                                                   // hit-stop
+  const dist=Math.hypot(pete.hx-g.x,pete.hz-g.z), st=g.state; g.t++;
+  if(GN_STAND.includes(st)||st==='hopoff'){ if(dist<GN.redDist) g.red=true; } else if(GN_DOWN.includes(st)) g.red=false;   // eyes turn RED as they close in
+  switch(st){
+    case 'hopoff': { const u=Math.min(1,g.t/g.hof); g.x=g.hx0+(g.hx1-g.hx0)*u; g.z=g.hz0+(g.hz1-g.hz0)*u; g.y=g.hy0*(1-u)+GN.hopApex*1.25*4*u*(1-u); g.k=g.k0+(g.k1-g.k0)*u;
+      if(g.t>=g.hof){ g.y=0; g.x=g.hx1; g.z=g.hz1; g.k=g.k1; g.state='hop'; g.t=GN.hopCrouch+GN.hopAir; g.hops=1; g.face=pete.hx>=g.x?1:-1; } break; }
+    case 'hop': { const a0=GN.hopCrouch, a1=GN.hopCrouch+GN.hopAir;
+      if(g.t>a0 && g.t<=a1){ const u=(g.t-a0)/GN.hopAir; g.x=g.hx0+(g.hx1-g.hx0)*u; g.z=g.hz0+(g.hz1-g.hz0)*u; g.y=GN.hopApex*4*u*(1-u); g.k=g.k0+(g.k1-g.k0)*u; }
+      else if(g.t>a1){ g.x=g.hx1; g.z=g.hz1; g.y=0; g.k=g.k1; }
+      if(g.t>=GN.hopFrames) gnomeDecide(g); break; }
+    case 'idle': if(g.t>=10) gnomeDecide(g); break;
+    case 'windup': if(g.t>=GN.windup){ g.state='poke'; g.t=0; gnomePoke(g); } break;
+    case 'poke': if(g.t>=GN.strike){ g.state='recover'; g.t=0; } break;
+    case 'recover': if(g.t>=GN.recover){ g.cd=GN.cooldown; g.state='idle'; g.t=0; } break;
+    case 'stut': if(g.t>=GN.stutter){ if(g.downAfter) gnomeStartFall(g); else { g.state='idle'; g.t=0; } } break;
+    case 'fly': { const u=Math.min(1,g.t/GN.kickMax); g.x+=g.vx; g.y=GN.kickApex*4*u*(1-u);
+      if(Math.abs(g.x)>=GN.wallX){ g.x=Math.sign(g.x)*GN.wallX; g.vx*=-GN.wallBounce; g.state='wall'; g.t=0; g.stut=GN.stutter; g.flash=4; l2Burst(g.x,g.z,'dust',8); }   // bounced off the side wall behind it
+      else if(g.t>=GN.kickMax){ g.y=0; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=GN.landSq; } } break; }
+    case 'wall': { g.x=Math.max(-GN.wallX,Math.min(GN.wallX,g.x+g.vx)); g.y=Math.max(0,g.y-6);
+      if(g.t>=GN.wallFrames){ g.y=0; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=GN.landSq; } } break; }
+    case 'air': { const Hg=GN.rows*g.k; g.vy-=GN.grav; g.y+=g.vy; g.x+=g.vx; g.rot+=g.vr;                      // g.vr = cartoon tumble (kick only)
+      if(Math.abs(g.x)>=GN.wallX){ g.x=Math.sign(g.x)*GN.wallX; g.vx*=-(g.kick?GN.kickBounce:GN.wallBounce); g.vr*=-0.7; g.stut=GN.stutter; g.flash=4; if(g.kick) g.sq=8; g.bounces=(g.bounces||0)+1; l2Burst(g.x,g.z,'dust',g.kick?10:6); }
+      if(g.y+Hg>=GN.ceil && g.vy>0){ g.y=GN.ceil-Hg; g.vy=-Math.abs(g.vy)*(g.kick?0.5:0.4); g.sq=g.kick?8:6; g.stut=GN.stutter; g.flash=4; g.bounces=(g.bounces||0)+1; if(g.kick) l2Burst(g.x,g.z,'dust',8); }   // the hat hits the ceiling and bounces
+      if(g.y<=0 && g.vy<0){ g.y=0; g.vy=0; g.rot=0; g.vr=0; g.kick=false; if(g.downAfter) gnomeStartFall(g); else { g.state='land'; g.t=0; } } break; }
+    case 'land': if(g.t>=GN.landSq+GN.stagger){ g.state='idle'; g.t=0; } break;
+    case 'fall': if(g.t>=GN.fall){ g.state='down'; g.t=0; } break;
+    case 'down': if(g.t>=GN.down){ g.state='blink'; g.t=0; } break;
+    case 'blink': if(g.t>=GN.blink){ g.state='getup'; g.t=0; } break;
+    case 'getup': if(g.t>=GN.getup){ g.state='idle'; g.t=0; g.hp=1; g.stood=true; g.red=true; g.cd=20; } break;   // after standing up, ONE hit knocks it down again
+    case 'dying': if(g.t>=GN.dying) g.state='dead'; break;
+  }
+}
+function gnomeHit(g,kind,dir){                              // every hit = 1 HP: stutter; a kick flies back to the wall; an uppercut flies up to the ceiling
+  g.hp-=1; g.flash=6; g.stut=GN.stutter; g.fz=4; g.red=true; g.fd=dir; g.downAfter=g.hp<=0; g.y=0;
+  l2Burst(g.x,g.z,'dust',5);
+  if(g.state==='windup') g.cd=GN.cdHit;
+  g.rot=0; g.vr=0; g.kick=false; g.bounces=0;
+  if(kind==='kick'){ g.state='air'; g.t=0; g.vx=GN.kickVX*dir; g.vy=GN.kickVY; g.kick=true; g.vr=GN.kickSpin*dir; }   // comic kick: up AND back in a big arc, tumbling, bounces off the ceiling or the wall (whichever it meets first)
+  else if(kind==='upper'){ g.state='air'; g.t=0; g.vx=GN.upVX*dir; g.vy=GN.upV; }
+  else { g.state='stut'; g.t=0; g.x=Math.max(-GN.wallX,Math.min(GN.wallX,g.x+dir*GN.push)); }
+}
+function l2StickBlood(){ pete.footBlood=Math.min(GN.bloodCap,(pete.footBlood||0)+1); }
+function l2AddBlood(x,z){
+  const rad=[]; for(let i=0;i<12;i++) rad.push(40+((i*41+7)%25)+(i%3)*2);
+  const drops=[]; for(let i=0;i<9;i++) drops.push({a:i*0.7+0.2,d:72+((i*37)%58),r:4+(i%3)*2});
+  const streaks=[]; for(let i=0;i<3;i++) streaks.push({a:i*2.1+0.9,d0:40,d1:88+i*14});
+  LV.blood.push({x,z,rad,drops,streaks,age:0});
+}
+function gnomeKill(g,landed){                               // the finishing stomp / jump: squash, red pool + splatter stay, Pete's feet get redder
+  g.state='dying'; g.t=0; g.y=0; l2AddBlood(g.x,g.z); l2Burst(g.x,g.z,'blood',16); l2StickBlood(); if(landed) playStompSfx();
+}
+function l2GnomeAttack(a,R,stomp){
+  const dir=pete.face==='right'?1:-1, sx=pete.hx+dir*R.d, sz=pete.hz;
+  const near=(list)=>{ let best=null,bd=1e9; for(const g of LV.gnomes){ if(!list.includes(g.state)) continue; const d=Math.hypot(g.x-sx,(g.z-sz)*ATTACK_ZWEIGHT); if(d<=R.R&&d<bd){ bd=d; best=g; } } return best; };
+  if(stomp){ const dn=near(GN_DOWN); if(dn){ gnomeKill(dn,false); return; } }       // a stomp finishes the nearest downed gnome first
+  const g=near(GN_STAND); if(!g) return;                                           // punches/kicks pass over a downed gnome; a stomp on a standing one is a normal 1-HP hit
+  const key=a.set+a.index;
+  gnomeHit(g,stomp?'stomp':key==='punch2'?'upper':(key==='kick0'||key==='kick1')?'kick':'jab',dir);
+}
+function l2GnomeLand(dir){
+  for(const g of LV.gnomes){
+    if(Math.hypot(g.x-pete.hx,(g.z-pete.hz)*L2_LAND_ZW)>L2_LAND_R) continue;
+    if(GN_DOWN.includes(g.state)) gnomeKill(g,true); else if(GN_STAND.includes(g.state)) gnomeHit(g,'land',dir);
+  }
+}
+// ---- drawing ----
+function l2SideClipX(tr){ return HL.proj(-GN.sideX,0,tr.z).x; }   // the near edge of the dark side-hall opening in the left wall: everything left of it is still inside the side hall (hidden)
+function drawTractorEv(){
+  const E=LV.ev, tr=E.tr; if(!tr) return;
+  ctx.save(); ctx.beginPath(); ctx.rect(l2SideClipX(tr),0,5000,5000); ctx.clip();
+  const side=tr.view==='side', S=ENEMY_ART.SIDE, W=side?264:190, H=side?150:124, pc=GN.kT*HL.depthScale(tr.z), base=HL.proj(tr.x,0,tr.z), f=tr.f>>1;
+  ctx.save(); ctx.globalAlpha=tr.alpha; ctx.imageSmoothingEnabled=false;
+  ctx.fillStyle='rgba(0,0,0,.38)'; ctx.beginPath(); ctx.ellipse(base.x,base.y,W*0.46*pc*Math.max(0.05,tr.sx),9*pc,0,0,7); ctx.fill();
+  ctx.translate(base.x,base.y); ctx.scale(Math.max(0.02,tr.sx),1);
+  const L=-W/2*pc, T=-H*pc, put=(c,gx,gy)=>ctx.drawImage(c,L+(gx+tr.shx)*pc,T+(gy+tr.shy)*pc,c.width*pc,c.height*pc);
+  if(side){
+    put(eaSmoke(true,f),0,S.smokeY); put(eaSideBody(),0,0);
+    for(const k of ['rear','front']){ const w=eaWheel(k), rot=k==='rear'?tr.rot:tr.rot*S.rear.R/S.front.R;
+      ctx.save(); ctx.translate(L+(w.ox+w.c.width/2+tr.shx)*pc,T+(w.oy+w.c.height/2+tr.shy)*pc); ctx.rotate(rot); ctx.drawImage(w.c,-w.c.width/2*pc,-w.c.height/2*pc,w.c.width*pc,w.c.height*pc); ctx.restore(); }
+    S.stacks.forEach((sx,k)=>put(eaFlame(f+k*2),sx-1,30));
+  } else {
+    put(eaSmoke(false,f),0,-50); put(eaFlame(f),46,-14); put(eaFlame(f+2),134,-14); put(eaFrontBody(),0,0);
+  }
+  ctx.restore();
+  if(E.smoke) for(const p of E.smoke){                         // exhaust puffs: grey (black during revs), rising, drifting, growing and fading, in hall depth
+    const q=HL.proj(p.X,p.Y,tr.z-1), u=p.age/p.life, a=Math.min(1,p.age/6)*(1-u)*0.7, rr=p.r*q.s, c=Math.round(150-118*p.dark);
+    ctx.globalAlpha=a*0.55; ctx.fillStyle='rgb('+(c+22)+','+(c+22)+','+(c+24)+')'; ctx.beginPath(); ctx.arc(q.x,q.y,rr,0,7); ctx.fill();
+    ctx.globalAlpha=a; ctx.fillStyle='rgb('+c+','+c+','+(c+2)+')'; ctx.beginPath(); ctx.arc(q.x-rr*0.12,q.y-rr*0.1,rr*0.66,0,7); ctx.fill(); }
+  ctx.restore();
+}
+function drawGnomeMob(g){
+  const tr=LV.ev.tr, rider=g.state==='rider', sideRider=rider&&tr&&tr.view==='side';
+  const P=HL.proj(g.x,g.y,g.z), F=HL.proj(g.x,0,g.z), pc=g.k*P.s, spr=eaGnome(g.v,g.red&&!rider), mir=!!ENEMY_ART.VARIANTS[g.v].mirror;
+  const face=sideRider?1:(rider?(pete.hx>=g.x?1:-1):g.face), flip=((face>0)!==mir), st=g.state, t=g.t;
+  let ssx=1, ssy=1, rot=0, jx=0, lift=0, vis=true, split=false, tdx=0, tdy=0;
+  const ts=mir?1:-1;                                                              // side of the sprite the weapon is on (before the flip)
+  if(g.stut>0 && st!=='fall') jx=((g.stut>>1)&1)?1.2:-1.2;                       // hit stutter: quick left/right shake
+  if(st==='hop'){ if(t<=GN.hopCrouch){ const u=t/GN.hopCrouch; ssy=1-0.2*u; ssx=1+0.15*u; } else if(t<=GN.hopCrouch+GN.hopAir){ const u=(t-GN.hopCrouch)/GN.hopAir; ssy=1+0.15*(1-u); ssx=1/Math.sqrt(ssy); } else { const u=Math.min(1,(t-GN.hopCrouch-GN.hopAir)/6); ssy=0.78+0.22*u; ssx=1.18-0.18*u; } }   // bunny hop: crouch, stretch, land squash
+  else if(st==='hopoff'){ const u=g.t/GN.hopOffFrames; ssy=1+0.12*(1-u); ssx=1/Math.sqrt(ssy); }
+  else if(st==='windup'){ split=true; const u=t/GN.windup; tdx=-ts*2*u; tdy=-3*u; ssy=1-0.06*u; }
+  else if(st==='poke'){ split=true; tdx=ts*5; tdy=3; }
+  else if(st==='recover'){ split=true; const u=t/GN.recover; tdx=ts*5*(1-u); tdy=3*(1-u); }
+  else if(st==='air'&&g.kick){ rot=g.rot; if(g.sq>0){ ssx=1.3; ssy=0.72; rot=g.rot*0.3; } }   // comic kick: full cartoon tumble, SQUASH flat on the ceiling / wall impact
+  else if(st==='fly'||st==='wall'||st==='air'){ rot=g.fd*0.55; if(st==='wall'||g.sq>0){ ssx=0.8; ssy=1.12; } }
+  else if(st==='land'){ if(t<GN.landSq){ const u=t/GN.landSq; ssy=0.7+0.3*u; ssx=1.25-0.25*u; } }
+  else if(st==='fall'){ const u=t/GN.fall; rot=g.fd*Math.PI/2*u*u; }
+  else if(st==='down'){ rot=g.fd*Math.PI/2; }
+  else if(st==='blink'){ rot=g.fd*Math.PI/2; vis=(Math.floor(t/6)%2===0); }
+  else if(st==='getup'){ const u=t/GN.getup; rot=g.fd*Math.PI/2*(1-u*u); }
+  else if(st==='dying'){ const u=Math.min(1,t/GN.dying); rot=(g.fd||0)*Math.PI/2; ssy=1-0.9*u; ssx=1+0.55*u; }
+  if(Math.abs(rot)>0.4 && st!=='air') lift=14*pc*Math.min(1,Math.abs(rot)/(Math.PI/2));       // lying down: lift the body onto the floor line
+  if(!vis) return;
+  ctx.save(); ctx.imageSmoothingEnabled=false;
+  if(tr&&rider){ ctx.globalAlpha=tr.alpha; ctx.beginPath(); ctx.rect(l2SideClipX(tr),0,5000,5000); ctx.clip(); }   // riders are hidden inside the side hall too
+  if(!rider){ const hs=Math.max(0.35,1-g.y/260); ctx.fillStyle='rgba(0,0,0,'+(0.36*hs)+')'; ctx.beginPath(); ctx.ellipse(F.x,F.y,13*pc*hs*(st==='dying'?ssx:1),3.6*pc*hs,0,0,7); ctx.fill(); }   // floor shadow stays on the floor
+  ctx.translate(P.x+jx*pc,P.y-lift); ctx.scale(ssx,ssy); ctx.rotate(rot); ctx.scale(flip?-1:1,1);
+  const dw=(c,ox,oy)=>ctx.drawImage(c,(-17+ox)*pc,(-38+oy)*pc,c.width*pc,c.height*pc);
+  if(split){ dw(spr.body,0,0); dw(spr.tool,tdx,tdy); } else dw(spr.full,0,0);
+  if(g.flash>0){ ctx.globalAlpha*=0.6; dw(spr.white,0,0); }
+  ctx.restore();
+}
 function mobPlace(m){ m.x=m.cx+m.rx*Math.cos(m.a); m.z=m.cz+m.rz*Math.sin(m.a); m.th=Math.atan2(m.rz*Math.cos(m.a)*m.w,-m.rx*Math.sin(m.a)*m.w); }
 function spawnMob(sp,i){
   const T=MOB_TYPES[sp.type];
@@ -5026,7 +5853,8 @@ function spawnMob(sp,i){
 function peteMaxHp(def){ const r=(typeof ST_PETE_STATS!=='undefined')?ST_PETE_STATS.find(s=>s[0]==='Constitution'):null; return r?r[1]:def.hp; }
 function loadLevel(def){
   LV={def, mobs:def.mobs.map(spawnMob), goo:[], fx:[], hp:peteMaxHp(def), hpMax:peteMaxHp(def), spawnBack:true, exit:0, hurtFlash:0, alertF:0, dlg:null, door:{state:'closed',t:0},
-      pressE:false, pressConfirm:false, spaceHeld:false, hint:{shown:false,age:0}, headX:0, headY:0};
+      pressE:false, pressConfirm:false, spaceHeld:false, hint:{shown:false,age:0}, headX:0, headY:0,
+      gnomes:[], blood:[], ev:{phase:'idle',t:0,freeze:0,tr:null}};   // fight 2: gnome list, red blood pools, murder tractor event (phase idle -> roll -> rev -> fight -> cleared)
 }
 function initLevel2(){
   const jk=!!(pete&&pete.jacket);                        // an equipped jacket (skill tree) carries into Level 2
@@ -5035,19 +5863,22 @@ function initLevel2(){
   const D=LEVEL_DEFS.level2; loadLevel(D);
   plats=[]; stair={x:-9999,w:1}; fires=[]; debrisFields=[]; crumbles=[]; item=null; rubble=null; car=null;
   beat2Shown=true; beat2Timer=0; levelTimer=Infinity; checkpointX=null; box=null; enteringSub=null; timeFall=null; peteGlow=0; startAlert=SA_END;
-  pete.jacket=jk; pete.hx=D.play.spawn.x; pete.hz=D.play.spawn.z; pete.footGoo=0; pete.lastDir='W';   // (lastDir 'W' = back view, the demo's spawn) hall coordinates; pete.x / depth are unused in Level 2
+  pete.jacket=jk; pete.hx=D.play.spawn.x; pete.hz=D.play.spawn.z; pete.footGoo=0; pete.footBlood=0; pete.lastDir='W';   // (lastDir 'W' = back view, the demo's spawn) hall coordinates; pete.x / depth are unused in Level 2
   pete.depth=0; pete.y=ROAD-pete.h; pete.face='right'; pete.onGround=true;                              // the hall floor is one constant ground for the jump physics
   camX=0; levelFadeIn=0; HL.layout();
 }
-function l2Frozen(){ return !!(LV && (LV.dlg || LV.door.state==='opening' || LV.exit)); }
+function l2Frozen(){ return !!(LV && (LV.dlg || LV.door.state==='opening' || LV.exit || LV.ev.freeze>0)); }
 // ---- level end: Pete walks into the open door -> short fade -> the waving CREDITS screen (creditsFrom=2 routes its CONTINUE JOURNEY back to Level 2) ----
 const L2_EXIT_FRAMES=36;
 function l2Finish(){ creditsFrom=2; box=null; cancelAttack(); stopLevel2Music(); setState('CREDITS'); }
 function l2Replay(){ setState('LEVEL2'); initLevel2(); if(keys.Space){ keys.Space=false; LV.spaceHeld=true; } }   // fresh Level 2 (roaches, goo, door, hp, alert, hint, music); the confirm Space never becomes a jump
 // ---- text-box hint: STOMP THE BUGS until every roach is squished (after the FIND YOUR GUIDE alert); a door dialog line temporarily replaces it ----
 function l2HintBox(){
-  if(l2MobsAlive()>0 && !LV.dlg && LV.alertF>=SA_END){
+  const bugs=l2MobsAlive()>0 && !LV.dlg && LV.alertF>=SA_END, gn=!bugs && !LV.dlg && LV.ev.phase==='fight' && l2GnomesAlive()>0;   // fight 2 hint (added): floor them with 3 hits, then stomp
+  if(bugs){
     if(!box||!box._l2h){ showBox([[{text:'STOMP THE BUGS ',color:'#ffe27a'},{text:TOUCH?'(Hold KICK = X)':'(Hold KICK)',color:'#e8f8f2'}],'Or JUMP onto them.']); box._l2h=1; }
+  } else if(gn){
+    if(!box||box._l2h!==2){ showBox([[{text:'STOMP THE GNOMES ',color:'#ffe27a'},{text:TOUCH?'(Hold KICK = X)':'(Hold KICK)',color:'#e8f8f2'}],'Floor them with 3 hits first, then stomp or JUMP on them.']); box._l2h=2; }
   } else if(box&&box._l2h) box=null;
 }
 // ---- jump-landing squish: Pete landing from a jump with his feet within L2_LAND_R of a roach (hall units, z weighted like the touch rule) squishes it exactly like the stomp ----
@@ -5062,6 +5893,7 @@ function l2JumpLand(){
     if(Math.hypot(m.x-pete.hx,(m.z-pete.hz)*L2_LAND_ZW)<=L2_LAND_R){ damageMob(m,m.hp,dir); hit=true; }   // m.hp = lethal: same squash, goo, burst as the stomp kill
   }
   if(hit){ playStompSfx(); l2StickGoo(); }
+  l2GnomeLand(dir);                                         // fight 2: a downed gnome under his feet is finished, a standing one takes 1 hit
 }
 function l2Locked(){ return state==='LEVEL2' && l2Frozen(); }
 function l2Key(e){
@@ -5073,6 +5905,7 @@ function l2Click(){ if(LV.dlg) l2Confirm(); }
 function l2ShowLine(){
   const ln=LV.dlg.lines[LV.dlg.i];
   showBox([[{text:ln.who+': ',color:ln.who==='PETE'?'#ffe27a':'#9affb0'},{text:ln.text,color:'#e8f8f2'}]]);
+  if(ln.sfx==='hiss' && !musicMuted) playHiss();             // the cat hisses when the voice refuses (respects mute)
 }
 function l2StartDialog(lines,cb){ LV.dlg={lines,i:0,cb:cb||null}; l2ShowLine(); }
 function l2Confirm(){
@@ -5084,9 +5917,11 @@ function l2Confirm(){
 function l2NearDoor(){ const D=LV.def, dr=D.door; return pete.hx>=D.hall.halfW-D.play.xMargin-dr.reachX && pete.hz>=dr.z0-dr.reachZ && pete.hz<=dr.z1+dr.reachZ; }
 function l2MobsAlive(){ let n=0; for(const m of LV.mobs) if(m.state==='alive') n++; return n; }
 function l2OpenDialog(){
-  const D=LV.def, alive=l2MobsAlive()>0;
+  const D=LV.def, ph=LV.ev.phase;
   cancelAttack(); pete.vx=0; pete.walk=0; pete.face='right'; pete.lastDir='D'; pete.walkReleaseAt=null;   // demo: Pete turns to the door (right wall), guard idle
-  l2StartDialog(alive?D.dialogs.knock:D.dialogs.clear, alive?null:()=>{ LV.door.state='opening'; LV.door.t=0; });
+  if(l2MobsAlive()>0 || (ph!=='idle' && ph!=='cleared')) l2StartDialog(D.dialogs.refuse,null);                // roaches or gnomes outside: LET ME IN DAMNIT! / Too late! + hiss
+  else if(ph==='idle') l2StartDialog(D.dialogs.gone,l2StartEvent);                                          // roaches dead: "mobs are gone" -> "What are you doing here?!" -> the tractor rolls in
+  else l2StartDialog(D.dialogs.clear,()=>{ LV.door.state='opening'; LV.door.t=0; });                       // gnomes dead: the old "coast is clear" dialog, then the door opens
 }
 // ---- mobs ----
 function updateMobs(){
@@ -5110,8 +5945,10 @@ function damageMob(m,dmg,dir){
 function l2ResolveAttack(){
   const a=pete.attack; if(!a||!a.active||!a.entry||a.mobDone||!attackAtContact()) return;
   a.mobDone=true;
+  const R=ATTACK_REACH[a.set+a.index];
+  if(R && LV.gnomes.length) l2GnomeAttack(a,R,a.set==='kick'&&a.index===2);   // fight 2: every attack can hit a gnome (1 HP each); the stomp finishes a downed one
   if(a.set!=='kick'||a.index!==2) return;   // only the STOMP (hold kick) hurts roaches; the other attacks play normally but never damage them (the jump-landing squish is l2JumpLand)
-  const R=ATTACK_REACH[a.set+a.index]; if(!R) return;
+  if(!R) return;
   const dir=pete.face==='right'?1:-1, sx=pete.hx+dir*R.d, sz=pete.hz;
   let best=null, bd=1e9;
   for(const m of LV.mobs){
@@ -5124,7 +5961,8 @@ function l2ResolveAttack(){
 function l2HurtPete(m,T){                                  // demo hurtPete(): 1 of 5 hp, 90 frames of blink, small red flash
   pete.hurt=LV.def.invul; LV.hurtFlash=8; LV.hp-=T.dmg;
   playHitSfx();   // "UMPH!" (same injury path as Level 1's debris collision)
-  if(LV.hp<=0){ LV.hp=LV.hpMax; pete.hx=LV.def.play.spawn.x; pete.hz=LV.def.play.spawn.z; pete.hurt=120; LV.hurtFlash=30; cancelAttack(); }   // demo: refill, back to the hall start (roaches and goo stay)
+  if(LV.hp<=0){ LV.hp=LV.hpMax; pete.hx=LV.def.play.spawn.x; pete.hz=LV.def.play.spawn.z; pete.hurt=120; LV.hurtFlash=30; cancelAttack();   // demo: refill, back to the hall start (roaches and goo stay)
+    if(LV.ev.phase==='fight'||LV.ev.phase==='rev') l2ResetFight2(); }                                                                                                  // fight 2: the gnomes climb back on the tractor, blood cleared
 }
 // ---- goo + particles (demo addGoo / burst / goo+fx update) ----
 function l2AddGoo(x,z){
@@ -5133,18 +5971,19 @@ function l2AddGoo(x,z){
   LV.goo.push({x,z,rad,drops,age:0});
 }
 function l2Burst(x,z,kind,n){
-  const goo=kind==='goo';
+  const goo=kind==='goo'||kind==='blood';
   for(let i=0;i<n;i++){ const a=i*0.35+(i%3), sp=goo?2+(i*7%5):1.2+(i*7%5)*0.3;
     LV.fx.push({X:x,Y:8,z,vx:Math.cos(a)*sp,vy:goo?5+(i%4)*2.2:2+(i%4)*1.4,vz:Math.sin(a)*sp*0.7,life:goo?50:26,kind}); }
 }
 function l2UpdateGooFx(){
-  for(const g of LV.goo) g.age++;
+  for(const g of LV.goo) g.age++; for(const g of LV.blood) g.age++;
   for(let i=LV.fx.length-1;i>=0;i--){ const p=LV.fx[i]; p.X+=p.vx; p.z+=p.vz; p.Y+=p.vy; p.vy-=0.7;
     if(p.Y<=0){ p.Y=0; p.vy=0; p.vx*=0.6; p.vz*=0.6; } if(--p.life<=0) LV.fx.splice(i,1); }
 }
 function l2Timers(){                                       // per-frame timers (demo update): blink, red flash, foot goo fade
   if(pete.hurt>0) pete.hurt--; if(LV.hurtFlash>0) LV.hurtFlash--;
   if(pete.footGoo>0) pete.footGoo=Math.max(0,pete.footGoo-1/MOB_TYPES.roach.footGooFrames);
+  if(pete.footBlood>0) pete.footBlood=Math.max(0,pete.footBlood-1/GN.bloodFade);
 }
 // ---- Level 2 per-frame update. updatePlatformer hands over to updateHall() in LEVEL2 (the hall has its own space; Pete's
 // input resolution, attacks, jump and hit-stop are the same shared calls Level 1 uses). ----
@@ -5156,7 +5995,8 @@ function hallJump(){
   if(pete.vy>=0 && (wasGrounded || footY(pete)>=gY)){ pete.y=gY-pete.h; pete.vy=0; pete.onGround=true; if(!wasGrounded && LV && !LV.exit) l2JumpLand(); }   // landing from a jump: squish roaches under his feet
 }
 function l2UpdateFrozen(){                                 // dialog / door opening: Pete is held (guard idle), roaches keep circling
-  const D=LV.def; LV.alertF++; updateMobs(); l2UpdateGooFx(); l2Timers(); hallJump();
+  const D=LV.def; LV.alertF++; updateMobs(); l2EventUpdate(); l2UpdateGooFx(); l2Timers(); hallJump();
+  if(LV.ev.freeze>0 && !LV.dlg){ pete.vx=0; pete.walk=0; }                      // the reveal: Pete is held for the first 1.5 s of the roll-in
   if(LV.exit && ++LV.exit>=L2_EXIT_FRAMES){ l2Finish(); return; }
   const pr=LV.pressE||LV.pressConfirm;
   if(LV.dlg){ if(pr) l2Confirm(); }
@@ -5189,7 +6029,7 @@ function updateHall(){
 }
 function l2Update(){
   const D=LV.def;
-  LV.alertF++; updateMobs(); l2UpdateGooFx(); l2Timers(); l2ResolveAttack();
+  LV.alertF++; updateMobs(); l2EventUpdate(); l2UpdateGooFx(); l2Timers(); l2ResolveAttack();
   if(pete.hurt<=0){                                        // roach touch (demo): floor distance < hitR, jumping over is safe
     const air=ROAD-footY(pete);
     for(const m of LV.mobs){ if(m.state!=='alive') continue; const T=MOB_TYPES[m.type].touch;
@@ -5225,10 +6065,11 @@ function l2DrawBubble(){
 function drawLevel2(){
   HL.layout();
   ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,PLAYFIELD_BOTTOM); ctx.clip();
-  HL.drawHall(); HL.drawDoor(LV.door); HL.drawGoo(LV.goo);   // demo render(): hall, door, goo piles (flat on the floor), then the depth-sorted pass
+  HL.drawHall(); HL.drawDoor(LV.door); HL.drawGoo(LV.goo); HL.drawBlood(LV.blood);   // demo render(): hall, door, goo piles + blood pools (flat on the floor, permanent), then the depth-sorted pass
   resetFront();                                            // big foot / big hand are flushed after the sorted pass (frontmost)
   const zl=[{z:pete.hz,f:drawPeteSorted}];                 // Pete + live/dying roaches, far (big z) first, exactly the demo's sort
   for(const m of LV.mobs) if(m.state!=='dead') zl.push({z:m.z,f:()=>drawMob(m)});
+  if(LV.ev.tr){ zl.push({z:LV.ev.tr.z,f:drawTractorEv}); for(const g of LV.gnomes) if(g.state!=='dead') zl.push({z:g.state==='rider'?LV.ev.tr.z-2:g.z,f:()=>drawGnomeMob(g)}); }   // fight 2: murder tractor + gnomes join the sort
   zl.sort((a,b)=>b.z-a.z); for(const it of zl) it.f();
   HL.drawFx(LV.fx);                                        // goo droplets / dust on top of everything in the sorted pass
   flushFront();
@@ -5270,13 +6111,14 @@ function drawL2Alert(){   // same green HUD alert as Level 1's drawStartAlert (s
   ctx.restore();
 }
 function l2DrawHud(){   // segmented health bar, top-left: ONE thin segment per health point (= Pete's Constitution), 1px lines, green HUD style
-  const n=LV.hpMax, x=14, y=14, sw=14, sh=8, gap=2, pad=3, bx=x+22, bw=n*(sw+gap)-gap, hot=LV.hurtFlash>0;
+  const n=LV.hpMax, x=14, y=14, sw=14, sh=8, gap=2, pad=3, bx=x+22, bw=n*(sw+gap)-gap, hot=LV.hurtFlash>0, low=LV.hp<=2;   // low = 2 hits left or fewer: the whole bar turns RED
   ctx.save(); ctx.textAlign='left'; ctx.textBaseline='alphabetic';
-  ctx.font='bold 11px Trebuchet MS'; ctx.fillStyle=hot?'#ff9a9a':'#5dff8a'; ctx.fillText('HP',x,y+sh);
-  ctx.fillStyle='rgba(2,22,9,.78)'; ctx.fillRect(bx-pad,y-pad,bw+pad*2,sh+pad*2);
-  ctx.strokeStyle=hot?'rgba(255,120,120,.9)':'rgba(93,255,138,.65)'; ctx.lineWidth=1; ctx.strokeRect(bx-pad+.5,y-pad+.5,bw+pad*2-1,sh+pad*2-1);
+  if(low && LV.hp===1) ctx.globalAlpha=0.55+0.45*Math.abs(Math.sin(LV.alertF*Math.PI/30));   // last point pulses
+  ctx.font='bold 11px Trebuchet MS'; ctx.fillStyle=(hot||low)?(low?'#ff6a6a':'#ff9a9a'):'#5dff8a'; ctx.fillText('HP',x,y+sh);
+  ctx.fillStyle=low?'rgba(30,4,4,.78)':'rgba(2,22,9,.78)'; ctx.fillRect(bx-pad,y-pad,bw+pad*2,sh+pad*2);
+  ctx.strokeStyle=(hot||low)?'rgba(255,120,120,.9)':'rgba(93,255,138,.65)'; ctx.lineWidth=1; ctx.strokeRect(bx-pad+.5,y-pad+.5,bw+pad*2-1,sh+pad*2-1);
   for(let i=0;i<n;i++){ const sx=bx+i*(sw+gap), on=i<LV.hp;
-    ctx.fillStyle=on?(hot?'#ff6a6a':'#3ee08a'):'#143022'; ctx.fillRect(sx,y,sw,sh);
+    ctx.fillStyle=on?(hot?'#ff6a6a':(low?'#e03a3a':'#3ee08a')):(low?'#3a1414':'#143022'); ctx.fillRect(sx,y,sw,sh);
     if(on){ ctx.fillStyle='rgba(255,255,255,.3)'; ctx.fillRect(sx,y,sw,2); } }
   ctx.restore();
 }
@@ -6342,7 +7184,8 @@ function drawPeteSorted(){
     // arm flew overhead = the S-walk "wave" flicker. Gating on |vy| ignores those 1-frame blips.
     const pOpts={face:pete.face,walk:pete.walk,jacket:pete.jacket,cat:true,deferFront:true};   // big foot/hand are flushed by drawPlatformer (frontmost)
     if(hall) pOpts.footGoo=pete.footGoo;                                            // Level 2: green stomp splatter on the far foot (drawPete)
-    if(state==='LEVEL2'&&LV&&(LV.dlg||LV.door.state==='opening'||LV.exit)) pOpts.guard=true;   // talking to the door / walking in: guard idle (existing o.guard override)
+    if(hall) pOpts.footBlood=pete.footBlood;                                        // Level 2 fight 2: red blood on the feet/legs, on top of the goo (drawPete)
+    if(state==='LEVEL2'&&LV&&(LV.dlg||LV.door.state==='opening'||LV.exit||LV.ev.freeze>0)) pOpts.guard=true;   // talking to the door / walking in: guard idle (existing o.guard override)
     else if(hall&&LV.spawnBack) pOpts.back=true;                                    // Level 2 spawn: back view, close-up behind the head
     const trulyAirborne = !pete.onGround && Math.abs(pete.vy) > 1.5;   // real jump/fall, not depth jitter
     if(trulyAirborne) pOpts.air = -pete.vy;
