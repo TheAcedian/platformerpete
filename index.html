@@ -506,8 +506,8 @@ function collapseBoom(){                      // the big final impact as the bui
 // Fired from updatePlatformer at the move's contact frame (ATTACK_HIT_TT), once per attack. Muted = no nodes made.
 // =====================================================================
 let _fxN=null;
-const _FX_CAP={jab:4, stomp:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[]};
-let _fxCalls={jab:0, stomp:0};          // debug counters (incremented only when a sound is actually built)
+const _FX_CAP={jab:4, stomp:2, tick:2}, _FX_GAP=0.045, _fxLive={jab:[], stomp:[], tick:[]};
+let _fxCalls={jab:0, stomp:0, tick:0};          // debug counters (incremented only when a sound is actually built)
 function _fxInit(){
   if(_fxN) return _fxN;
   const AC=Tone.context.rawContext;
@@ -639,6 +639,25 @@ function playStompSfx(){
       cfl.type='bandpass'; cfl.Q.value=6; cfl.frequency.value=rnd(1100,2600)*(0.8+wet*0.5); env(cgn,pt,rnd(0.25,0.5)*S,0.012,0.001);
       c.connect(cfl); cfl.connect(cgn); cgn.connect(master); }
     _fxLive.stomp.push({at:ctx.currentTime, end:t+Math.max(bd,rd)}); _fxCalls.stomp++;
+  }catch(e){}
+}
+
+// LOW-TIME CLOCK TICK (original): a dry wooden "tick" (high) / "tock" (lower) once per timer second below 0:15.
+// Fresh short voices only (click burst + tiny sine knock, ~70 ms), a cap of 2 live, muted = no nodes made.
+function playTickSfx(tock){
+  const N=_fxGate('tick'); if(!N) return;
+  try{
+    const ctx=N.AC, t=ctx.currentTime+0.005, f=tock?1050:1500, g=ctx.createGain();
+    g.gain.value=0.5; g.connect(N.out);
+    const s=ctx.createBufferSource(); s.buffer=N.nbJ; s.start(t,Math.random()*0.5); s.stop(t+0.05);
+    const bp=ctx.createBiquadFilter(), sg=ctx.createGain(); bp.type='bandpass'; bp.Q.value=4; bp.frequency.value=f*2.2;
+    sg.gain.setValueAtTime(0.0001,t); sg.gain.linearRampToValueAtTime(0.9,t+0.001); sg.gain.exponentialRampToValueAtTime(0.0001,t+0.03); sg.gain.setValueAtTime(0,t+0.035);
+    s.connect(bp); bp.connect(sg); sg.connect(g);
+    const o=ctx.createOscillator(), og=ctx.createGain(); o.type='sine';
+    o.frequency.setValueAtTime(f,t); o.frequency.exponentialRampToValueAtTime(f*0.7,t+0.05);
+    og.gain.setValueAtTime(0.0001,t); og.gain.linearRampToValueAtTime(0.55,t+0.002); og.gain.exponentialRampToValueAtTime(0.0001,t+0.06); og.gain.setValueAtTime(0,t+0.065);
+    o.connect(og); og.connect(g); o.start(t); o.stop(t+0.07);
+    _fxLive.tick.push({at:ctx.currentTime, end:t+0.08}); _fxCalls.tick++;
   }catch(e){}
 }
 
@@ -4381,23 +4400,70 @@ let pickupPrompt=false;
 // world drops away (TIME-OUT FALL, vertigo), then the level restarts through initLevel(). ----
 const LEVEL_TIME_FRAMES=60*60;      // 1:00
 // START ALERT: pops in at every level start (cutscene entry + timer-out restart), stays, blinks, gone. Frame-based @60fps cap.
-const START_ALERT_MSG="You have one minute to find an entrance!";
-const SA_POP=12, SA_BLINK_AT=118, SA_END=182;   // pop-in frames | blink starts | gone (~3.0 s total)
+const START_ALERT_MSG="ATTN: YOU HAVE ONE MINUTE TO FIND A STAIRWELL";
+// HUD sequence (frames @60fps): fade-in 0-10 | hold 10-80 | 3 blinks (14f each: 7 off, 7 on) 80-122 | minimize into the timer 122-170 (~2.8 s total)
+const SA_POP=10, SA_BLINK_AT=80, SA_BLINK_LEN=14, SA_MIN_AT=SA_BLINK_AT+3*SA_BLINK_LEN, SA_END=SA_MIN_AT+48;
 let startAlert=0;                   // frames since level start (counts up in updatePlatformer)
+let _tickSec=999;                   // last timer second a low-time tick fired for (reset on every level start)
+// Timer HUD box (2x the old 70x24), right edge parked well LEFT of the mute speaker (desktop speaker x W-34.., touch speaker x ~W-47..).
+const TIMER_BOX={w:140,h:44,y:8,gap:74};
+function timerRect(){ return {x:W-TIMER_BOX.gap-TIMER_BOX.w, y:TIMER_BOX.y, w:TIMER_BOX.w, h:TIMER_BOX.h}; }
+function timerInfo(){
+  const secs=Math.ceil(levelTimer/60), ph=levelTimer-60*(secs-1);   // ph counts 60..1 inside each second
+  const txt=Math.floor(secs/60)+':'+String(secs%60).padStart(2,'0');
+  const low=secs<=14;                                               // 0:14 and lower: blink red
+  return {secs,txt,low, redOn: low && (levelTimer<=0 || ph>30)};    // red flash starts on each second change (with the tick)
+}
+// green sheet-style HUD panel (SKILLTREE palette: ST_G/ST_GM, translucent dark-green fill, corner brackets, faint scanlines)
+function hudPanel(x,y,w,h,a,red,dim){
+  const c1=red?'#ff4a4a':ST_G, c2=red?'#b32222':ST_GM;
+  ctx.save(); ctx.globalAlpha*=a;
+  ctx.fillStyle=red?'rgba(34,4,4,0.88)':'rgba(2,22,9,0.88)'; ctx.fillRect(x,y,w,h);
+  ctx.strokeStyle=dim?c2:c1; ctx.lineWidth=1; ctx.strokeRect(x+.5,y+.5,w-1,h-1);
+  ctx.save(); ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+  ctx.fillStyle=red?'rgba(255,90,90,0.06)':'rgba(93,255,138,0.05)';
+  for(let sy=y+2;sy<y+h;sy+=4) ctx.fillRect(x,sy,w,1);
+  ctx.restore();
+  const b=Math.max(5,Math.min(16,h*0.28)); ctx.strokeStyle=c1; ctx.lineWidth=2; ctx.shadowColor=red?'#ff2a2a':'#3dff7a'; ctx.shadowBlur=dim?0:6;
+  ctx.beginPath();
+  ctx.moveTo(x+1,y+b); ctx.lineTo(x+1,y+1); ctx.lineTo(x+b,y+1);
+  ctx.moveTo(x+w-b,y+1); ctx.lineTo(x+w-1,y+1); ctx.lineTo(x+w-1,y+b);
+  ctx.moveTo(x+1,y+h-b); ctx.lineTo(x+1,y+h-1); ctx.lineTo(x+b,y+h-1);
+  ctx.moveTo(x+w-b,y+h-1); ctx.lineTo(x+w-1,y+h-1); ctx.lineTo(x+w-1,y+h-b);
+  ctx.stroke(); ctx.restore();
+}
+function hudText(txt,cx,cy,size,a,red,maxW){
+  ctx.save(); ctx.globalAlpha*=a; ctx.font='bold '+size+'px '+ST_FONT; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.shadowColor=red?'#ff2a2a':'#3dff7a'; ctx.shadowBlur=Math.max(4,size*0.3);
+  ctx.fillStyle=red?'#ff5050':ST_G; if(maxW) ctx.fillText(txt,cx,cy,maxW); else ctx.fillText(txt,cx,cy);
+  ctx.restore();
+}
 function drawStartAlert(){
   const f=startAlert; if(f>=SA_END || timeFall || enteringSub) return;
-  if(f>=SA_BLINK_AT && Math.floor((f-SA_BLINK_AT)/8)%2===1) return;   // blink off phase
-  const p=Math.min(1,f/SA_POP), e=1-Math.pow(1-p,3), sc=0.6+0.4*e;
-  const sz=Math.max(20,Math.min(30,W/30)), pad=18;
-  const cx=W/2, cy=(PLAYFIELD_BOTTOM-VIEW_TOP)*0.36;
-  ctx.save(); ctx.globalAlpha=Math.min(1,p*1.4);
-  ctx.font='bold '+sz+'px Trebuchet MS'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  const tw=Math.min(ctx.measureText(START_ALERT_MSG).width, W-80), bw=tw+pad*2, bh=sz+pad*1.4;
-  ctx.translate(cx,cy); ctx.scale(sc,sc);
-  ctx.fillStyle='rgba(0,0,0,.72)'; rr(-bw/2,-bh/2,bw,bh,12); ctx.fill();
-  ctx.strokeStyle='rgba(255,214,90,.95)'; ctx.lineWidth=2.5; rr(-bw/2,-bh/2,bw,bh,12); ctx.stroke();
-  ctx.lineJoin='round'; ctx.lineWidth=4; ctx.strokeStyle='rgba(0,0,0,.9)'; ctx.strokeText(START_ALERT_MSG,0,1,tw);
-  ctx.fillStyle='#ffe9a8'; ctx.fillText(START_ALERT_MSG,0,1,tw);
+  const Hh=PLAYFIELD_BOTTOM-VIEW_TOP;
+  let vis=1; if(f<SA_BLINK_AT+3*SA_BLINK_LEN && f>=SA_BLINK_AT) vis=((f-SA_BLINK_AT)%SA_BLINK_LEN<SA_BLINK_LEN/2)?0:1;   // 3 blinks: off then on, x3
+  const pop=Math.min(1,f/SA_POP);
+  const mp=f<SA_MIN_AT?0:Math.min(1,(f-SA_MIN_AT)/(SA_END-SA_MIN_AT)), me=mp<.5?2*mp*mp:1-Math.pow(-2*mp+2,2)/2;   // minimize progress (ease in-out)
+  const full={x:0,y:Hh*0.5-Math.min(70,Hh*0.2),w:W,h:Math.min(140,Hh*0.4)}, tr=timerRect();
+  const R={x:full.x+(tr.x-full.x)*me, y:full.y+(tr.y-full.y)*me, w:full.w+(tr.w-full.w)*me, h:full.h+(tr.h-full.h)*me};
+  ctx.save();
+  if(vis){
+    ctx.globalAlpha=pop;
+    // whole-screen HUD wash (fades as it minimizes) so the alert reads across the entire game area
+    ctx.fillStyle='rgba(2,22,9,'+(0.38*(1-me))+')'; ctx.fillRect(0,0,W,Hh);
+    ctx.fillStyle='rgba(93,255,138,'+(0.05*(1-me))+')'; for(let sy=1;sy<Hh;sy+=4) ctx.fillRect(0,sy,W,1);
+    const ti=timerInfo();
+    hudPanel(R.x,R.y,R.w,R.h,1,false,false);
+    // message (shrinks with the panel and cross-fades out) -> live timer text (cross-fades in, ends at the timer's own size)
+    const msz=Math.min(34,(W-56)/(START_ALERT_MSG.length*0.6)), ma=1-Math.min(1,mp*2.2), ta=Math.max(0,Math.min(1,(mp-0.45)*2));
+    const k=R.w/W;
+    if(ma>0){
+      ctx.save(); ctx.beginPath(); ctx.rect(R.x,R.y,R.w,R.h); ctx.clip();
+      hudText(START_ALERT_MSG,R.x+R.w/2,R.y+R.h/2,msz*Math.max(0.2,k),ma,false,Math.max(10,(R.w-24)));
+      ctx.restore();
+    }
+    if(ta>0) hudText(ti.txt,R.x+R.w/2,R.y+R.h/2+1,34*(0.6+0.4*me),ta,false);
+  }
   ctx.restore();
 }
 const TIMEFALL_LEN=170;             // frames of falling before the restart
@@ -4441,16 +4507,12 @@ function drawTimeFall(){
 // Countdown HUD, top-right, just LEFT of the mute speaker (muteBtn spans x W-34..W-10, y 10..30).
 function drawLevelTimer(){
   if(enteringSub) return;                                   // committed to the stairs: timer is gone
-  const secs=Math.ceil(levelTimer/60), low=secs<=10 && levelTimer>0;
+  if(startAlert<SA_END && !timeFall) return;                // the start alert is still shrinking into the timer: it draws the clock until it lands
   let a=1; if(timeFall) a=Math.max(0,1-timeFall.t/(TIMEFALL_LEN*0.3)); if(a<=0) return;
-  const txt=Math.floor(secs/60)+':'+String(secs%60).padStart(2,'0');
-  const pulse=low?0.5+0.5*Math.sin(levelTimer*0.35):0;
+  const ti=timerInfo(), r=timerRect(), red=ti.low&&ti.redOn;
   ctx.save(); ctx.globalAlpha=a;
-  ctx.fillStyle='rgba(0,0,0,.6)'; rr(W-110,8,70,24,6); ctx.fill();
-  ctx.strokeStyle=low?'rgba(255,'+Math.round(70+40*pulse)+',70,'+(0.6+0.4*pulse)+')':'rgba(180,200,230,.45)'; ctx.lineWidth=1.5; rr(W-110,8,70,24,6); ctx.stroke();
-  ctx.fillStyle=low?'rgb(255,'+Math.round(80+60*pulse)+',80)':'#e8f8f2';
-  ctx.font='bold 18px Trebuchet MS'; ctx.textAlign='center'; ctx.textBaseline='alphabetic';
-  ctx.fillText(txt,W-75,26); ctx.textAlign='left';
+  hudPanel(r.x,r.y,r.w,r.h,1,ti.low&&ti.redOn,ti.low&&!ti.redOn);
+  hudText(ti.txt,r.x+r.w/2,r.y+r.h/2+1,34,(ti.low&&!ti.redOn)?0.28:1,ti.low);   // red phase = bright red, off phase = dim red
   ctx.restore();
 }
 function initLevel(){
@@ -4569,7 +4631,7 @@ function initLevel(){
   // CAR set-piece in the breather stretch (after the late ravine ~2840, before the final pile ~3600)
   car={ x:3020, depth:0.45, phase:'wait', t:0 };
   enteringSub=null;   // reset subway entry lead-in
-  levelTimer=LEVEL_TIME_FRAMES; timeFall=null; peteGlow=0; startAlert=0;   // countdown restarts at 1:00 + start alert replays with every fresh level start
+  levelTimer=LEVEL_TIME_FRAMES; timeFall=null; peteGlow=0; startAlert=0; _tickSec=999;   // countdown restarts at 1:00 + start alert replays with every fresh level start
   pete.y=depthY(0)-pete.h;camX=0;
   showBox("← → move   •   ↑ / ↓ move in depth   •   Space jump ravines   •   R punch · F kick   •   E pick up.");
 }
@@ -4745,6 +4807,7 @@ function updatePlatformer(){
   if(peteGlow>0) peteGlow--;
   if(startAlert<SA_END) startAlert++;
   if(!enteringSub && levelTimer>0 && --levelTimer<=0){ levelTimer=0; timeFall={t:0}; cancelAttack(); return; }
+  if(!enteringSub && levelTimer>0){ const ts=Math.ceil(levelTimer/60); if(ts!==_tickSec){ _tickSec=ts; if(ts<=14) playTickSfx(ts%2===0); } }   // tick/tock once per second below 0:15
   // keep the rig/input clock current in the UPDATE pass (input resolution runs here, not in draw)
   perf2 = (typeof performance!=='undefined') ? performance.now() : (perf2+16);
   // resolve R/F tap/double/hold -> fire the attack via startAttack
@@ -6842,7 +6905,7 @@ const replayBtn={x:W/2-125,y:369,w:250,h:34};
 const restartBtn={x:14,y:12,w:150,h:34};
 function restartGame(){
   box=null; choice=null; puffs=[]; rubbleBits=[]; inventory.length=0; pickupPrompt=false; _subwayPrompted=false; enteringSub=null; timeFall=null; levelFadeIn=0;
-  startAlert=0; levelTimer=LEVEL_TIME_FRAMES; checkpointX=null; beat2Shown=false; descProg=0; descHold=0; stWorn.boxers=true; stOpen=null; stFig=null;
+  startAlert=0; _tickSec=999; levelTimer=LEVEL_TIME_FRAMES; checkpointX=null; beat2Shown=false; descProg=0; descHold=0; stWorn.boxers=true; stOpen=null; stFig=null;
   cutPhase='intro'; cut=0; introStep=0; yellCount=0; choiceRects=[];
   for(const k in keys) keys[k]=false; releaseAtkKeys();
   initLevel();            // fresh pete (jacket:false), plats, traps, pickups, timer
